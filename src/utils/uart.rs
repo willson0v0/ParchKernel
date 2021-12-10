@@ -4,9 +4,10 @@ use alloc::string::{String, ToString};
 use alloc::collections::VecDeque;
 use alloc::vec::Vec;
 use alloc::sync;
-use spin::Mutex;
+use crate::utils::{SpinMutex, Mutex};
 use super::{VirtAddr, PhysAddr};
 use core::option::Option;
+use crate::interrupt::get_cpu;
 
 // |--------|---------|-------------------------------------------------|
 // | Bit    | Pattern | Meaning                                         |
@@ -109,7 +110,7 @@ struct UartInner{
 
 pub struct Uart {
     address: usize,
-    inner: Mutex<UartInner>
+    inner: SpinMutex<UartInner>
 }
 
 impl Uart {
@@ -133,13 +134,13 @@ impl Uart {
         inner.init(115200, 38400);
         Self {
             address,
-            inner: Mutex::new(inner)
+            inner: SpinMutex::new("Uart Lock".to_string(), inner)
         }
     }
 
     /// Write to UART, using it's interrupt
     pub fn write(&self, data: String) {
-        let mut inner = self.inner.lock();
+        let mut inner = self.inner.acquire();
         while inner.write_buffer.len() >= 1024 {
             // TODO: drop yield lock
         }
@@ -147,13 +148,14 @@ impl Uart {
         inner.sync();
     }
 
+    /// kernel will use this to send output
     pub fn write_synced(&self, data: String) {
-        self.inner.lock().write_synced(data);
+        self.inner.acquire().write_synced(data);
     }
 
     /// Read from UART
     pub fn read(&self) -> char {
-        let mut inner = self.inner.lock();
+        let mut inner = self.inner.acquire();
         while inner.read_buffer.len() == 0 {
             // TODO: drop yield lock
         }
@@ -199,12 +201,12 @@ impl UartInner {
     }
     
     pub fn write_synced(&self, data: String) {
-        // TODO: push_off()
+        get_cpu().acquire().push_intr_off();
         for b in data.as_bytes() {
             while self.read_reg(self.line_status_register) & 0b00100000 == 0 {}
             self.write_reg(self.transmitter_holding_buffer, *b);
         }
-        // TODO: pop_off()
+        get_cpu().acquire().pop_intr_off();
     }
 
     pub fn read(&mut self) -> Option<u8> {

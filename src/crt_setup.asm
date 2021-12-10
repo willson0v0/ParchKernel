@@ -2,7 +2,7 @@
     .globl _start
 _start:
     la sp, boot_stack_top
-    call genesis
+    call genesis_m
 
     .section .bss.stack
     .globl boot_stack
