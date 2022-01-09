@@ -21,5 +21,7 @@ pub use uart::{
 };
 
 pub use fmt_print::{
-    print
+    print,
+    log,
+    LogLevel
 };

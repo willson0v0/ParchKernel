@@ -81,3 +81,146 @@ macro_rules! println {
         $crate::print!("{}\n", format_args!($($arg)*))
     };
 }
+
+#[derive(PartialEq, PartialOrd, Clone, Copy)]
+pub enum LogLevel {
+    Verbose = 0,
+    Debug = 1,
+    Info = 2,
+    Warning = 3,
+    Error = 4,
+    Milestone = 5,
+    Fatal = 6
+}
+
+impl LogLevel {
+    pub fn to_num(&self) -> usize {
+        *self as usize
+    }
+}
+
+static LOG_FG_COLOURS: &'static [u8] = &[
+    FG_B_BLACK,
+    FG_DEFAULT,
+    FG_B_WHITE,
+    FG_B_YELLOW,
+    FG_B_RED,
+    FG_B_GREEN,
+    FG_B_WHITE
+];
+
+static LOG_BG_COLOURS: &'static [u8] = &[
+    BG_DEFAULT,
+    BG_DEFAULT,
+    BG_DEFAULT,
+    BG_DEFAULT,
+    BG_DEFAULT,
+    BG_DEFAULT,
+    BG_RED
+];
+
+static LOG_TITLE: &'static [&str] = &[
+    "VERBOSE    ",
+    "DEBUG      ",
+    "INFO       ",
+    "WARNING    ",
+    "ERROR      ",
+    "MILESTONE  ",
+    "FATAL      ",
+];
+
+pub fn do_log(log_level: LogLevel, args: fmt::Arguments) {
+    print!("\x1b[{};{}m{}", LOG_FG_COLOURS[log_level.to_num()], LOG_BG_COLOURS[log_level.to_num()], LOG_TITLE[log_level.to_num()]);
+    print(args);
+    println!("\x1b[{};{}m", FG_DEFAULT, BG_DEFAULT)
+}
+
+
+pub fn log(log_level: LogLevel, args: fmt::Arguments) {
+    match log_level {
+        LogLevel::Verbose => {
+            if cfg!(feature = "log_verbose") {
+                do_log(log_level, args);
+            }
+        },
+        LogLevel::Debug => {
+            if cfg!(feature = "log_debug") {
+                do_log(log_level, args);
+            }
+        },
+        LogLevel::Info => {
+            if cfg!(feature = "log_info") {
+                do_log(log_level, args);
+            }
+        },
+        LogLevel::Warning => {
+            if cfg!(feature = "log_warning") {
+                do_log(log_level, args);
+            }
+        },
+        LogLevel::Error => {
+            if cfg!(feature = "log_error") {
+                do_log(log_level, args);
+            }
+        },
+        LogLevel::Milestone => {
+            if cfg!(feature = "log_milestone") {
+                do_log(log_level, args);
+            }
+        },
+        LogLevel::Fatal => {
+            if cfg!(feature = "log_fatal") {
+                do_log(log_level, args);
+            }
+        },
+    }
+}
+
+#[macro_export]
+macro_rules! verbose {
+    ($($arg:tt)*) => {
+        $crate::utils::log($crate::utils::LogLevel::Verbose, format_args!($($arg)*));
+    }
+}
+
+#[macro_export]
+macro_rules! debug {
+    ($($arg:tt)*) => {
+        $crate::utils::log($crate::utils::LogLevel::Debug, format_args!($($arg)*));
+    }
+}
+
+#[macro_export]
+macro_rules! info {
+    ($($arg:tt)*) => {
+        $crate::utils::log($crate::utils::LogLevel::Info, format_args!($($arg)*));
+    }
+}
+
+#[macro_export]
+macro_rules! warning {
+    ($($arg:tt)*) => {
+        $crate::utils::log($crate::utils::LogLevel::Warning, format_args!($($arg)*));
+    }
+}
+
+#[macro_export]
+macro_rules! error {
+    ($($arg:tt)*) => {
+        $crate::utils::log($crate::utils::LogLevel::Error, format_args!($($arg)*));
+    }
+}
+
+#[macro_export]
+macro_rules! milestone {
+    ($($arg:tt)*) => {
+        $crate::utils::log($crate::utils::LogLevel::Milestone, format_args!($($arg)*));
+    }
+}
+
+#[macro_export]
+macro_rules! fatal {
+    ($($arg:tt)*) => {
+        $crate::utils::log($crate::utils::LogLevel::Fatal, format_args!($($arg)*));
+    }
+}

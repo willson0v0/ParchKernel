@@ -86,6 +86,13 @@ extern "C" fn genesis_m() {
 #[no_mangle]
 extern "C" fn genesis_s() {
     mem::init_kernel_heap();
-    print!("Hello world!");
+    println!("Hello world!");
+    verbose!("Hello world!");
+    debug!("Hello world!");
+    info!("Hello world!");
+    warning!("Hello world!");
+    error!("Hello world!");
+    milestone!("Hello world!");
+    fatal!("Hello world!");
     loop{}
 }
