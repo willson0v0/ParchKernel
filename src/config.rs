@@ -8,3 +8,5 @@ pub const UART0_IRQ: usize = 10;
 pub const PLIC_ADDR: PhysAddr = PhysAddr(0x0C000000);
 
 pub const MAX_CPUS: usize = 16;
+
+pub const UART0_ADDR: PhysAddr = PhysAddr(0x10000000);

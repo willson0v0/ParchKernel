@@ -8,6 +8,14 @@ use crate::utils::{SpinMutex, Mutex};
 use super::{VirtAddr, PhysAddr};
 use core::option::Option;
 use crate::interrupt::get_cpu;
+use lazy_static::*;
+use crate::config::UART0_ADDR;
+
+lazy_static!{
+    pub static ref UART0: Uart = {
+        Uart::new(UART0_ADDR)
+    };
+}
 
 // |--------|---------|-------------------------------------------------|
 // | Bit    | Pattern | Meaning                                         |
@@ -109,25 +117,25 @@ struct UartInner{
 }
 
 pub struct Uart {
-    address: usize,
+    address: PhysAddr,
     inner: SpinMutex<UartInner>
 }
 
 impl Uart {
-    pub fn new(address: usize) -> Self {
+    pub fn new(address: PhysAddr) -> Self {
         let inner = UartInner{
-            transmitter_holding_buffer          : (address + 0x0).into(),
-            receiver_buffer                     : (address + 0x0).into(),
-            divisor_latch_low_byte              : (address + 0x0).into(),
-            interrupt_enable_register           : (address + 0x1).into(),
-            divisor_latch_high_byte             : (address + 0x1).into(),
-            interrupt_identification_register   : (address + 0x2).into(),
-            fifo_control_register               : (address + 0x2).into(),
-            line_control_register               : (address + 0x3).into(),
-            modem_control_register              : (address + 0x4).into(),
-            line_status_register                : (address + 0x5).into(),
-            modem_status_register               : (address + 0x6).into(),
-            scratch_register                    : (address + 0x7).into(),
+            transmitter_holding_buffer          : address + 0x0,
+            receiver_buffer                     : address + 0x0,
+            divisor_latch_low_byte              : address + 0x0,
+            interrupt_enable_register           : address + 0x1,
+            divisor_latch_high_byte             : address + 0x1,
+            interrupt_identification_register   : address + 0x2,
+            fifo_control_register               : address + 0x2,
+            line_control_register               : address + 0x3,
+            modem_control_register              : address + 0x4,
+            line_status_register                : address + 0x5,
+            modem_status_register               : address + 0x6,
+            scratch_register                    : address + 0x7,
             write_buffer                        : VecDeque::new(),
             read_buffer                         : VecDeque::new()
         };
@@ -139,7 +147,7 @@ impl Uart {
     }
 
     /// Write to UART, using it's interrupt
-    pub fn write(&self, data: String) {
+    pub fn write(&self, data: &str) {
         let mut inner = self.inner.acquire();
         while inner.write_buffer.len() >= 1024 {
             // TODO: drop yield lock
@@ -149,7 +157,7 @@ impl Uart {
     }
 
     /// kernel will use this to send output
-    pub fn write_synced(&self, data: String) {
+    pub fn write_synced(&self, data: &str) {
         self.inner.acquire().write_synced(data);
     }
 
@@ -194,13 +202,13 @@ impl Uart {
 }
 
 impl UartInner {
-    pub fn write(&mut self, data: String) {
+    pub fn write(&mut self, data: &str) {
         for b in data.as_bytes() {
             self.write_buffer.push_back(*b);
         }
     }
     
-    pub fn write_synced(&self, data: String) {
+    pub fn write_synced(&self, data: &str) {
         get_cpu().acquire().push_intr_off();
         for b in data.as_bytes() {
             while self.read_reg(self.line_status_register) & 0b00100000 == 0 {}
@@ -210,7 +218,7 @@ impl UartInner {
     }
 
     pub fn read(&mut self) -> Option<u8> {
-        if(self.read_reg(self.line_status_register) & 0b00000001 != 0) {
+        if self.read_reg(self.line_status_register) & 0b00000001 != 0 {
             Some(self.read_reg(self.receiver_buffer))
         } else {
             None
@@ -223,7 +231,7 @@ impl UartInner {
         }
 
         while let Some(b) = self.write_buffer.front(){
-            if (self.read_reg(self.line_status_register) & 0b00100000 == 0) {
+            if self.read_reg(self.line_status_register) & 0b00100000 == 0 {
                 // UART THR is full.
                 // wait for next uart interrupt.
                 // TODO: Wakeup yielded process

@@ -1,3 +1,5 @@
+cargo-features = ["edition2021"]
+
 [package]
 name = "parch_kernel"
 version = "0.1.0"

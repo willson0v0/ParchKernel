@@ -14,3 +14,12 @@ pub use lock::{
     MutexGuard,
     Mutex
 };
+
+pub use uart::{
+    Uart,
+    UART0
+};
+
+pub use fmt_print::{
+    print
+};

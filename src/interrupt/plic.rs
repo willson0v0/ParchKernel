@@ -23,7 +23,7 @@ impl PLIC {
         for irq in irqs {
             // set irq priorities
             unsafe {
-                (self.address + usize::try_from(irq).unwrap() * size_of::<u32>() as usize).write_volatile(&1u32);
+                (self.address + irq as usize * size_of::<u32>() as usize).write_volatile(&1u32);
             }
         }
     }

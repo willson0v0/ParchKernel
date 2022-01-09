@@ -86,5 +86,6 @@ extern "C" fn genesis_m() {
 #[no_mangle]
 extern "C" fn genesis_s() {
     mem::init_kernel_heap();
+    print!("Hello world!");
     loop{}
 }
