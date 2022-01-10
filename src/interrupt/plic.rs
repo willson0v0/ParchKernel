@@ -1,22 +1,23 @@
 use core::mem::size_of;
 
 use crate::{config::{UART0_IRQ, PLIC_ADDR}, utils::PhysAddr};
-use alloc::vec::Vec;
+use alloc::vec::{self, Vec};
 use super::get_hart_id;
+use lazy_static::*;
 
-// TODO: Check gem5's PLIC layout
+lazy_static!{
+    pub static ref PLIC0: PLIC = PLIC::new(PLIC_ADDR) ;
+}
 
-struct PLIC {
+pub struct PLIC {
     address: PhysAddr,
 }
 
 impl PLIC {
-    pub fn new(address: PhysAddr, irqs: Vec<u32>) -> Self {
-        let s = PLIC {
+    pub fn new(address: PhysAddr) -> Self {
+        PLIC {
             address
-        };
-        // TODO enable irqs
-        s
+        }
     }
 
     pub fn enable_irqs_priority(&self, irqs: Vec<u32>) {

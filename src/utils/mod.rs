@@ -1,8 +1,10 @@
-mod fmt_print;
+#[macro_use]
+mod fmt_io;
 mod panic_handler;
 mod uart;
 mod types;
 mod lock;
+mod time;
 
 pub use types::{
     VirtAddr, 
@@ -20,8 +22,15 @@ pub use uart::{
     UART0
 };
 
-pub use fmt_print::{
+pub use fmt_io::{
     print,
     log,
-    LogLevel
+    LogLevel,
+    get_char,
+    get_byte,
+    get_line,
+    k_get_char,
+    k_get_byte,
+    k_get_line,
+    get_term_size
 };

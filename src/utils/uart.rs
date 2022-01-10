@@ -1,13 +1,11 @@
 #![allow(dead_code)]
 
-use alloc::string::{String, ToString};
+use alloc::string::{ToString};
 use alloc::collections::VecDeque;
-use alloc::vec::Vec;
-use alloc::sync;
 use crate::utils::{SpinMutex, Mutex};
-use super::{VirtAddr, PhysAddr};
+use super::{PhysAddr};
 use core::option::Option;
-use crate::interrupt::get_cpu;
+use crate::interrupt::{ pop_intr_off, push_intr_off};
 use lazy_static::*;
 use crate::config::UART0_ADDR;
 
@@ -158,12 +156,16 @@ impl Uart {
 
     /// kernel will use this to send output
     pub fn write_synced(&self, data: &str) {
+        // prevent trap get inner deadlocked
+        push_intr_off();
         self.inner.acquire().write_synced(data);
+        pop_intr_off();
     }
 
     /// Read from UART
     pub fn read(&self) -> char {
         let mut inner = self.inner.acquire();
+        // waiting for irq
         while inner.read_buffer.len() == 0 {
             // TODO: drop yield lock
         }
@@ -199,6 +201,68 @@ impl Uart {
             Some(res) => res
         }
     }
+
+    /// Read synced from UART
+    pub fn read_synced(&self) -> char {
+        let mut inner = self.inner.acquire();
+        let init : u8 = if let Some(res) = inner.read_buffer.pop_front(){
+            res
+        } else {
+            inner.read_synced()
+        };
+        let mut buf : u32;
+
+        let length : u8;
+        if init < 0b10000000 {
+            return init as char;
+        }
+        else if init < 0b11100000 {length = 2;}
+        else if init < 0b11110000 {length = 3;}
+        else if init < 0b11111000 {length = 4;}
+        else if init < 0b11111100 {length = 5;}
+        else if init < 0b11111110 {length = 6;}
+        else { return '�'; }     // illegal utf-8 sequence
+        buf = (init & (0b01111111 >> length)) as u32;
+    
+        for _i in 1..length {
+            let b : u8 = if let Some(res) = inner.read_buffer.pop_front(){
+                res
+            } else {
+                inner.read_synced()
+            };
+
+            if b & 0b11000000 != 0b10000000 { return '�'; }
+            assert_eq!(b & 0b11000000, 0b10000000); // check utf-8 sequence
+            buf <<= 6;
+            buf += (b & 0b00111111) as u32;
+        }
+        match char::from_u32(buf) {
+            None => '�',    // unknown sequence
+            Some(res) => res
+        }
+    }
+
+    pub fn read_byte(&self) -> u8 {
+        let mut inner = self.inner.acquire();
+        // waiting for irq
+        while inner.read_buffer.len() == 0 {
+            // TODO: drop yield lock
+        }
+        inner.read_buffer.pop_front().unwrap()
+    }
+
+    pub fn read_byte_synced(&self) -> u8 {
+        let mut inner = self.inner.acquire();
+        if let Some(res) = inner.read_buffer.pop_front(){
+            res
+        } else {
+            inner.read_synced()
+        }
+    }
+
+    pub fn sync(&self) {
+        self.inner.acquire().sync();
+    }
 }
 
 impl UartInner {
@@ -209,12 +273,10 @@ impl UartInner {
     }
     
     pub fn write_synced(&self, data: &str) {
-        get_cpu().acquire().push_intr_off();
         for b in data.as_bytes() {
             while self.read_reg(self.line_status_register) & 0b00100000 == 0 {}
             self.write_reg(self.transmitter_holding_buffer, *b);
         }
-        get_cpu().acquire().pop_intr_off();
     }
 
     pub fn read(&mut self) -> Option<u8> {
@@ -222,6 +284,14 @@ impl UartInner {
             Some(self.read_reg(self.receiver_buffer))
         } else {
             None
+        }
+    }
+
+    pub fn read_synced(&mut self) -> u8 {
+        loop {
+            if let Some(res) = self.read() {
+                return res;
+            }
         }
     }
 
@@ -234,8 +304,7 @@ impl UartInner {
             if self.read_reg(self.line_status_register) & 0b00100000 == 0 {
                 // UART THR is full.
                 // wait for next uart interrupt.
-                // TODO: Wakeup yielded process
-                return;
+                break;
             }
 
             self.write_reg(self.transmitter_holding_buffer, *b);

@@ -1,9 +1,11 @@
 use core::panic::PanicInfo;
 
-use crate::print;
-
 #[panic_handler]
-fn panic(_info: &PanicInfo) -> ! {
-    print!("Panic.");
+fn panic(info: &PanicInfo) -> ! {
+    if let Some(location) = info.location() {
+        fatal!("Panic @ {}:{} : {}", location.file(), location.line(), info.message().unwrap());
+    } else {
+        fatal!("Panic @ ?:? : {}", info.message().unwrap());
+    }
     loop {}
 }

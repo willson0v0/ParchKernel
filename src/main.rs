@@ -4,34 +4,36 @@
 #![feature(global_asm)]
 #![feature(alloc_error_handler)]
 #![feature(exclusive_range_pattern)]
+#![feature(panic_info_message)]
+#![feature(format_args_capture)]
 
+#[macro_use]
 mod utils;
 mod mem;
 mod config;
 mod interrupt;
+mod version;
 
+#[macro_use]
 extern crate alloc;
 extern crate lazy_static;
 
 global_asm!(include_str!("crt_setup.asm"));
+global_asm!(include_str!("interrupt/kernel_trap.asm"));
+global_asm!(include_str!("interrupt/trampoline.asm"));
 
-use riscv::register::{
-    mstatus,
-    mepc,
-    satp,
-    medeleg,
-    mideleg,
-    sie,
-    pmpaddr0,
-    pmpcfg0,
-    mhartid
-};
+use riscv::register::{medeleg, mepc, mhartid, mideleg, mie, mscratch, mstatus, mtvec, pmpaddr0, pmpcfg0, satp, sie, sstatus, stvec};
+
+use crate::utils::PhysAddr;
+
+static mut MSCRATCH_ARR: [[usize; 6]; config::MAX_CPUS] = [[0; 6]; config::MAX_CPUS];
 
 #[no_mangle]
 extern "C" fn genesis_m() {
     // set mstatus previous privilege
     extern "C" {
         fn genesis_s();
+        fn timervec();
     }
     // every hart will go through this and set their tps
     unsafe {
@@ -65,7 +67,7 @@ extern "C" fn genesis_m() {
         // set s intr
         sie::set_sext();
         sie::set_ssoft();
-        sie::set_stimer();
+        sie::set_stimer();  // seems deprecated, can only go with mtimecmp -> mtime -> sip -> s-mode soft int now
         sie::set_uext();
         sie::set_usoft();
         sie::set_utimer();
@@ -73,6 +75,20 @@ extern "C" fn genesis_m() {
         pmpaddr0::write(0x3fffffffffffffusize);
         pmpcfg0::write(0xfusize);
         let hart_id = mhartid::read();
+        // set timer interrupt and set up mscratch
+        // mscratch for the cpu will store registers used in timervec
+        // scratch[0,1,2] : register save area.
+        // scratch[4] : address of CLINT's MTIMECMP register.
+        // scratch[5] : desired interval between interrupts.
+        interrupt::CLINT.set_mtimecmp(hart_id, interrupt::CLINT.get_time() + (config::CLOCK_FREQ / config::TIMER_FRAC) as usize);
+        MSCRATCH_ARR[hart_id][4] = (config::CLINT_ADDR + 0x4000 + 8 * hart_id).0;
+        MSCRATCH_ARR[hart_id][5] = config::CLOCK_FREQ / config::TIMER_FRAC;
+        mscratch::write(MSCRATCH_ARR[hart_id].as_ptr() as usize);
+        // only enableling timer interrupt so should be fine
+        mtvec::write(timervec as usize, mtvec::TrapMode::Direct);
+        mstatus::set_mie();
+        mie::set_mtimer();
+        // set thread pointer and return
         asm! {
             "mv tp, {0}",
             "mret",
@@ -86,13 +102,17 @@ extern "C" fn genesis_m() {
 #[no_mangle]
 extern "C" fn genesis_s() {
     mem::init_kernel_heap();
-    println!("Hello world!");
-    verbose!("Hello world!");
-    debug!("Hello world!");
-    info!("Hello world!");
-    warning!("Hello world!");
-    error!("Hello world!");
-    milestone!("Hello world!");
-    fatal!("Hello world!");
-    loop{}
+    println!("\r\n\n\n\nParch OS\n");
+    println!("Ver\t: {}", version::VERSION);
+    unsafe {
+        extern "C" {
+            fn kernel_vec();
+        }
+        sstatus::set_sie();
+        stvec::write(kernel_vec as usize, stvec::TrapMode::Direct)
+    }
+    
+    loop{
+        print!("a");
+    }
 }

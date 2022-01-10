@@ -51,27 +51,22 @@ impl CPU {
         }
     }
 
-    // TODO: Make this raii?
-    pub fn push_intr_off(&mut self) {
+    /// WARN: Don't use these! use push/pop_intr_off!
+    pub fn register_push_off(&mut self, intr_state_b4: bool) {
         if self.int_off_count == 0 {
-            self.int_enable_b4_off = self.intr_state();
-        }
-        unsafe {
-            sstatus::clear_sie();
+            self.int_enable_b4_off = intr_state_b4;
         }
         self.int_off_count += 1;
     }
 
-    pub fn pop_intr_off(&mut self) {
+    pub fn register_pop_off(&mut self) -> bool {
         if self.int_off_count < 1 {
             panic!("unmatched pop_intr_off");
         }
         
         self.int_off_count -= 1;
 
-        if self.int_off_count == 1 && self.int_enable_b4_off {
-            unsafe { sstatus::set_sie(); }
-        }
+        self.int_off_count == 0 && self.int_enable_b4_off
     }
 
     pub fn intr_state(&self) -> bool{
@@ -101,4 +96,20 @@ pub fn get_hart_id() -> usize {
 
 pub fn get_cpu() -> Arc<SpinMutex<CPU>> {
     return CPU_MANAGER.get_cpu(get_hart_id());
+}
+
+pub fn push_intr_off() {
+    // intr off, then lock
+    let intr_state = sstatus::read().sie();
+    unsafe {
+        sstatus::clear_sie();
+    }
+    get_cpu().acquire_no_off().register_push_off(intr_state);
+}
+
+pub fn pop_intr_off() {
+    // unlock, then intr on
+    if get_cpu().acquire_no_off().register_pop_off() {
+        unsafe {sstatus::set_sie()};
+    }
 }

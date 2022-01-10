@@ -13,6 +13,9 @@ buddy_system_allocator = "0.8.0"
 riscv = "0.7.0"
 lazy_static = { version = "1.4.0", features = ["spin_no_std"] }
 
+[build-dependencies]
+chrono = "0.4"
+
 [features]
 log_fatal       = [                 ]
 log_milestone   = ["log_fatal"      ]

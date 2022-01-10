@@ -1,6 +1,8 @@
 
 #![allow(unused)]
 
+use alloc::string::String;
+
 use super::UART0;
 use core::fmt::{self, Write};
 
@@ -74,11 +76,11 @@ macro_rules! print {
 #[macro_export]
 macro_rules! println {
     () => {
-        $crate::print!("\n")
+        $crate::print!("\r\n")
     };
     
     ($($arg:tt)*) => {
-        $crate::print!("{}\n", format_args!($($arg)*))
+        $crate::print!("{}\r\n", format_args!($($arg)*))
     };
 }
 
@@ -223,4 +225,81 @@ macro_rules! fatal {
     ($($arg:tt)*) => {
         $crate::utils::log($crate::utils::LogLevel::Fatal, format_args!($($arg)*));
     }
+}
+
+pub fn get_char() -> char {
+    super::UART0.read()
+}
+
+pub fn get_byte() -> u8 {
+    super::UART0.read_byte()
+}
+
+pub fn get_line() -> String {
+    let mut line =  String::new();
+
+    /// hard limit
+    while line.len() < 1024 {
+        let c = get_char();
+        if c == '\n' {
+            return line;
+        } else {
+            line.push(c);
+        }
+    }
+
+    line
+}
+
+pub fn k_get_char() -> char {
+    super::UART0.read_synced()
+}
+
+pub fn k_get_byte() -> u8 {
+    super::UART0.read_byte_synced()
+}
+
+pub fn k_get_line() -> String {
+    let mut line =  String::new();
+
+    /// hard limit
+    while line.len() < 1024 {
+        let c = k_get_char();
+        if c == '\n' {
+            return line;
+        } else {
+            line.push(c);
+        }
+    }
+
+    line
+}
+
+pub fn get_term_size() -> (usize, usize) {
+    print!("\x1b[s\x1b[999;999H\x1b[6n");
+    k_get_byte(); // \x1b
+    k_get_byte(); // '['
+    let mut height = 0usize;
+    loop {
+        let b = k_get_byte();
+        if b >= b'0' && b <= b'9' {
+            height *= 10;
+            height += (b - b'0') as usize;
+        } else {
+            break;
+        }
+    }
+    let mut width = 0usize;
+    loop {
+        let b = k_get_byte();
+        if b >= b'0' && b <= b'9' {
+            width *= 10;
+            width += (b - b'0') as usize;
+        } else {
+            break;
+        }
+    }
+    
+    print!("\x1b[u");
+    (height.into(), width.into())
 }
