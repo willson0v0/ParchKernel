@@ -46,11 +46,11 @@ pub struct SpinMutex<T> {
 }
 
 impl<T> SpinMutex<T> {
-    pub fn new(name: String, data: T) -> Self {
+    pub fn new(name: &str, data: T) -> Self {
         Self {
             is_acquired: AtomicBool::new(false),
             acquired_by: RefCell::new(None),
-            name,
+            name: String::from(name),
             data: UnsafeCell::new(data),
             did_push_off: RefCell::new(true)
         }

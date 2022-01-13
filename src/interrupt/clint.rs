@@ -1,6 +1,6 @@
 /// Core Local Interrupt
 /// 
-use crate::utils::PhysAddr;
+use crate::mem::PhysAddr;
 use lazy_static::*;
 use crate::config::CLINT_ADDR;
 

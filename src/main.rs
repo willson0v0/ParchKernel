@@ -21,10 +21,9 @@ extern crate lazy_static;
 global_asm!(include_str!("crt_setup.asm"));
 global_asm!(include_str!("interrupt/kernel_trap.asm"));
 global_asm!(include_str!("interrupt/trampoline.asm"));
+global_asm!(include_str!("mem/bitmap_reserve.asm"));
 
 use riscv::register::{medeleg, mepc, mhartid, mideleg, mie, mscratch, mstatus, mtvec, pmpaddr0, pmpcfg0, satp, sie, sstatus, stvec};
-
-use crate::utils::PhysAddr;
 
 static mut MSCRATCH_ARR: [[usize; 6]; config::MAX_CPUS] = [[0; 6]; config::MAX_CPUS];
 

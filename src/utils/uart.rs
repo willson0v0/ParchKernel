@@ -2,8 +2,8 @@
 
 use alloc::string::{ToString};
 use alloc::collections::VecDeque;
+use crate::mem::PhysAddr;
 use crate::utils::{SpinMutex, Mutex};
-use super::{PhysAddr};
 use core::option::Option;
 use crate::interrupt::{ pop_intr_off, push_intr_off};
 use lazy_static::*;
@@ -140,7 +140,7 @@ impl Uart {
         inner.init(115200, 38400);
         Self {
             address,
-            inner: SpinMutex::new("Uart Lock".to_string(), inner)
+            inner: SpinMutex::new("Uart", inner)
         }
     }
 

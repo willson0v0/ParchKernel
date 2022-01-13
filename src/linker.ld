@@ -1,6 +1,10 @@
 OUTPUT_ARCH(riscv)
 ENTRY(_start)
 BASE_ADDRESS = 0x80000000;
+PHYS_END_ADDRESS = 0x100000000;
+SUPERBLOCK_ADDRESS = 0xFFFFF000;
+PAGE_BITMAP_ADDRESS = 0xFFFFF000;
+INODE_BITMAP_ADDRESS = 0xFFFFF000;
 
 SECTIONS
 {
@@ -43,6 +47,21 @@ SECTIONS
     . = ALIGN(4K);
     ebss = .;
     ekernel = .;
+
+    . = INODE_BITMAP_ADDRESS;
+    sreserve = .;
+    .reserve : {
+        sinodebmap = .;
+        *(.reserve.inode)
+        ASSERT(. == PAGE_BITMAP_ADDRESS, "error: inode bitmap size malformed");
+        spagebmap = .;
+        *(.reserve.page)
+        ASSERT(. == SUPERBLOCK_ADDRESS == 65536, "error: page bitmap size malformed");
+        ssuperblock = .;
+        *(.reserve.superblock)
+        ASSERT(. == PHYS_END_ADDRESS, "error: superblock size malformed");
+    }
+    ereserve = .;
 
     /DISCARD/ : {
         *(.eh_frame)

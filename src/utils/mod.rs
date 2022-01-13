@@ -2,14 +2,8 @@
 mod fmt_io;
 mod panic_handler;
 mod uart;
-mod types;
 mod lock;
 mod time;
-
-pub use types::{
-    VirtAddr, 
-    PhysAddr
-};
 
 pub use lock::{
     SpinMutex,

@@ -25,7 +25,7 @@ lazy_static!{
     pub static ref CPU_MANAGER: CPUManager = {
         let mut cpus = Vec::new();
         for i in 0..MAX_CPUS {
-            cpus.push(Arc::new(SpinMutex::new("CPU Struct lock".to_string(),CPU::new(i))))
+            cpus.push(Arc::new(SpinMutex::new("CPU", CPU::new(i))))
         }
         CPUManager {
             cpus
@@ -60,12 +60,8 @@ impl CPU {
     }
 
     pub fn register_pop_off(&mut self) -> bool {
-        if self.int_off_count < 1 {
-            panic!("unmatched pop_intr_off");
-        }
-        
+        assert!(self.int_off_count >= 1, "unmatched pop_intr_off");
         self.int_off_count -= 1;
-
         self.int_off_count == 0 && self.int_enable_b4_off
     }
 
@@ -73,13 +69,11 @@ impl CPU {
         return sstatus::read().sie();
     }
 
+    /// wut?
     pub fn get_id(&self) -> usize {
         let hart_id = get_hart_id();
-        if self.hart_id != hart_id {
-            panic!("bad cpu hart")
-        } else {
-            hart_id
-        }
+        assert!(self.hart_id == hart_id, "bad cpu hart");
+        hart_id
     }
 }
 

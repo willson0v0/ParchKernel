@@ -27,12 +27,8 @@ pub fn kernel_trap() {
     let stval = stval::read();
     let sstatus = sstatus::read();
 
-    if sstatus.spp() != SPP::Supervisor {
-        panic!("kerneltrap not from supervisor mode,")
-    }
-    if sstatus.sie() {
-        panic!("kernel interrupt is enabled.")
-    }
+    assert!(sstatus.spp() == SPP::Supervisor, "kerneltrap not from supervisor mode");
+    assert!(sstatus.sie(), "kernel interrupt is enabled");
 
     match scause.cause() {
         // PLIC interrupt
