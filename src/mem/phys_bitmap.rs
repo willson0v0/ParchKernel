@@ -2,13 +2,17 @@ use core::{mem::size_of};
 use lazy_static::*;
 use alloc::{sync::Arc, vec::Vec};
 use crate::utils::{Mutex, SpinMutex};
-use crate::config::{PAGE_BITMAP_ADDR, PAGE_BITMAP_SIZE, INODE_BITMAP_ADDR, INODE_BITMAP_SIZE};
 
 use super::PhysAddr;
 
+extern "C" {
+    fn INODE_BITMAP_ADDRESS();
+    fn PAGE_BITMAP_ADDRESS();
+}
+
 lazy_static! {
     pub static ref INODE_BITMAP: SpinMutex<BitMap> = 
-        SpinMutex::new("InodeBitmap", BitMap::new(INODE_BITMAP_ADDR, INODE_BITMAP_SIZE));
+        SpinMutex::new("InodeBitmap", BitMap::new((INODE_BITMAP_ADDRESS as usize).into(), INODE_BITMAP_ADDRESS as usize - PAGE_BITMAP_ADDRESS as usize));
 }
 
 pub struct BitMapIndex {

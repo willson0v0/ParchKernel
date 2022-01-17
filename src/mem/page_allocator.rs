@@ -1,18 +1,26 @@
-use crate::{config::{INODE_BITMAP_ADDR, PAGE_BITMAP_ADDR, PAGE_BITMAP_SIZE, PHYS_END_ADDR, PHYS_START_ADDR}, utils::{Mutex, SpinMutex}};
+use crate::{utils::{Mutex, SpinMutex}};
 use alloc::sync::Arc;
 use lazy_static::*;
 use super::{PhysAddr, phys_bitmap::BitMap, types::PhysPageNum};
 
+extern "C" {
+	fn ekernel();
+	fn INODE_BITMAP_ADDR();
+	fn BASE_ADDRESS();
+	fn PHYS_END_ADDRESS ();
+	fn SUPERBLOCK_ADDRESS();
+	fn PAGE_BITMAP_ADDRESS();
+	fn INODE_BITMAP_ADDRESS();
+	fn INODE_LIST_ADDRESS();
+}
+
 lazy_static!{
 	static ref PAGE_ALLOCATOR: SpinMutex<BitMapPageAllocator> = {
-		extern "C" {
-			fn ekernel();
-		}
 		SpinMutex::new(
 			"PageAllocator", 
 			BitMapPageAllocator::new(
 				(ekernel as usize).into(),
-				(INODE_BITMAP_ADDR - (ekernel as usize)).0
+				(INODE_BITMAP_ADDR as usize) - (ekernel as usize)
 			)
 		)
 	};
@@ -49,13 +57,13 @@ pub struct BitMapPageAllocator {
 
 impl BitMapPageAllocator {
 	fn mark_unavailable(&mut self, ppn: PhysPageNum) {
-		let index = ppn - PhysPageNum::from(PHYS_START_ADDR);
+		let index = ppn - PhysPageNum::from(BASE_ADDRESS as usize);
 		assert!(!self.bitmap.get(index), "Marking used physical page");
 		self.bitmap.set(index);
 	}
 
 	fn mark_available(&mut self, ppn: PhysPageNum) {
-		let index = ppn - PhysPageNum::from(PHYS_START_ADDR);
+		let index = ppn - PhysPageNum::from(BASE_ADDRESS as usize);
 		assert!(self.bitmap.get(index), "Freeing free page");
 		self.bitmap.clear(index);
 	}
@@ -64,12 +72,12 @@ impl BitMapPageAllocator {
 impl PageAllocator for BitMapPageAllocator {
     fn new(begin: PhysAddr, length: usize) -> Self {
         let mut res = Self {
-			bitmap: BitMap::new(PAGE_BITMAP_ADDR, PAGE_BITMAP_SIZE)
+			bitmap: BitMap::new((PAGE_BITMAP_ADDRESS as usize).into(), SUPERBLOCK_ADDRESS as usize - PAGE_BITMAP_ADDRESS as usize)
 		};
 
 		// mark unavailable
-		let mut i: PhysPageNum = PHYS_START_ADDR.into();
-		while i <=  PHYS_END_ADDR.to_ppn_ceil() {
+		let mut i: PhysPageNum = (BASE_ADDRESS as usize).into();
+		while i <=  PhysAddr::from(PHYS_END_ADDRESS as usize).to_ppn_ceil() {
 			if i < begin.to_ppn_ceil() || i >= (begin + length).into() {
 				res.mark_unavailable(i)
 			}
