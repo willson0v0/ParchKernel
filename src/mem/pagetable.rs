@@ -116,7 +116,7 @@ pub struct PageTable {
 
 impl PageTable {
     pub fn new() -> Self {
-        let root = alloc_page();
+        let root = alloc_page(true);
         Self {
             root_ppn: root.ppn,
             pages: vec![root]
@@ -146,7 +146,7 @@ impl PageTable {
             let mut pte_content = unsafe{pte_addr.read_volatile::<PageTableEntry>()};
             if !pte_content.valid() {
                 if do_create {
-                    let pg = alloc_page();
+                    let pg = alloc_page(true);
                     pte_content.bits = 0;
                     pte_content.set_ppn(pg.ppn);
                     pte_content.set_flags(PTEFlags::empty());   // not leaf
