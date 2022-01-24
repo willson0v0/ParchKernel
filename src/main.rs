@@ -13,6 +13,7 @@ mod mem;
 mod config;
 mod interrupt;
 mod version;
+mod fs;
 
 #[macro_use]
 extern crate alloc;
@@ -99,15 +100,20 @@ extern "C" fn genesis_m() {
 
 #[no_mangle]
 extern "C" fn genesis_s() {
-    mem::init_kernel_heap();
-    println!("\r\n\n\n\nParch OS\n");
-    println!("Ver\t: {}", version::VERSION);
-    unsafe {
-        extern "C" {
-            fn kernel_vec();
+    if interrupt::get_hart_id() == 0 {
+        // common init code (mm/fs)
+        mem::init_kernel_heap();
+        println!("\r\n\n\n\nParch OS\n");
+        println!("Ver\t: {}", version::VERSION);
+        unsafe {
+            extern "C" {
+                fn kernel_vec();
+            }
+            sstatus::set_sie();
+            stvec::write(kernel_vec as usize, stvec::TrapMode::Direct)
         }
-        sstatus::set_sie();
-        stvec::write(kernel_vec as usize, stvec::TrapMode::Direct)
+    } else {
+        // hart specific init code
     }
     
     loop{

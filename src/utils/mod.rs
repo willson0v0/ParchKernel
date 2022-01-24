@@ -4,6 +4,7 @@ mod panic_handler;
 mod uart;
 mod lock;
 mod time;
+mod error;
 
 pub use lock::{
     SpinMutex,
@@ -27,4 +28,8 @@ pub use fmt_io::{
     k_get_byte,
     k_get_line,
     get_term_size
+};
+
+pub use error::{
+    ErrorNum
 };

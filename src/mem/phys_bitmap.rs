@@ -11,10 +11,10 @@ extern "C" {
     fn PAGE_BITMAP_FS_ADDRESS();
 }
 
-lazy_static! {
-    pub static ref INODE_BITMAP: SpinMutex<BitMap> = 
-        SpinMutex::new("InodeBitmap", BitMap::new((INODE_BITMAP_ADDRESS as usize).into(), INODE_BITMAP_ADDRESS as usize - PAGE_BITMAP_MM_ADDRESS as usize));
-}
+// lazy_static! {
+//     pub static ref INODE_BITMAP: SpinMutex<BitMap> = 
+//         SpinMutex::new("InodeBitmap", BitMap::new((INODE_BITMAP_ADDRESS as usize).into(), INODE_BITMAP_ADDRESS as usize - PAGE_BITMAP_MM_ADDRESS as usize));
+// }
 
 pub struct BitMapIndex {
     bits: u64,
@@ -152,7 +152,7 @@ impl BitMapIndex {
 pub struct BitMap {
     length: usize,
     start_addr: PhysAddr,
-    root_index: SpinMutex<BitMapIndex>
+    root_index: BitMapIndex
 }
 
 impl BitMap {
@@ -167,7 +167,7 @@ impl BitMap {
         Self {
             length,
             start_addr,
-            root_index: SpinMutex::new("BitMap", bi)
+            root_index: bi
         }
     }
 
@@ -197,7 +197,7 @@ impl BitMap {
     }
 
     pub fn get(&self, pos: usize) -> bool {
-        if self.root_index.acquire().get(pos / 64) {
+        if self.root_index.get(pos / 64) {
             true
         } else {
             self.raw_get(pos)
@@ -207,13 +207,13 @@ impl BitMap {
     pub fn set(&mut self, pos: usize) {
         self.raw_set(pos);
         if self.raw_get_bits(pos / 64) == 0xFFFF_FFFF_FFFF_FFFF {
-            self.root_index.acquire().set(pos / 64);
+            self.root_index.set(pos / 64);
         }
     }
 
     pub fn clear(&mut self, pos: usize) {
         self.raw_clear(pos);
-        self.root_index.acquire().clear(pos / 64);
+        self.root_index.clear(pos / 64);
     }
 
     pub fn set_val(&mut self, pos: usize, val: bool) {
@@ -225,7 +225,7 @@ impl BitMap {
     }
 
     pub fn first_empty(&self) -> Option<usize> {
-        self.root_index.acquire().first_empty().and_then(
+        self.root_index.first_empty().and_then(
             |arr_index: usize| -> Option<usize> {
                 for i in 0..64 {
                     let pos = arr_index * 64 + i;

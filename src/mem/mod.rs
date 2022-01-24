@@ -3,6 +3,8 @@ mod phys_bitmap;
 mod page_allocator;
 mod types;
 mod pagetable;
+mod mem_layout;
+mod segment;
 
 pub use kernel_heap::{init_kernel_heap};
 
