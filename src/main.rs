@@ -6,6 +6,8 @@
 #![feature(exclusive_range_pattern)]
 #![feature(panic_info_message)]
 #![feature(format_args_capture)]
+#![feature(step_trait)]
+#![feature(step_trait_ext)]
 
 #[macro_use]
 mod utils;
@@ -22,6 +24,8 @@ extern crate lazy_static;
 global_asm!(include_str!("crt_setup.asm"));
 global_asm!(include_str!("interrupt/kernel_trap.asm"));
 global_asm!(include_str!("interrupt/trampoline.asm"));
+
+use core::panic;
 
 use riscv::register::{medeleg, mepc, mhartid, mideleg, mie, mscratch, mstatus, mtvec, pmpaddr0, pmpcfg0, satp, sie, sstatus, stvec};
 
@@ -102,9 +106,6 @@ extern "C" fn genesis_m() {
 extern "C" fn genesis_s() {
     if interrupt::get_hart_id() == 0 {
         // common init code (mm/fs)
-        mem::init_kernel_heap();
-        println!("\r\n\n\n\nParch OS\n");
-        println!("Ver\t: {}", version::VERSION);
         unsafe {
             extern "C" {
                 fn kernel_vec();
@@ -112,6 +113,9 @@ extern "C" fn genesis_s() {
             sstatus::set_sie();
             stvec::write(kernel_vec as usize, stvec::TrapMode::Direct)
         }
+        mem::init();
+        println!("\r\n\n\n\nParch OS\n");
+        println!("Ver\t: {}", version::VERSION);
     } else {
         // hart specific init code
     }

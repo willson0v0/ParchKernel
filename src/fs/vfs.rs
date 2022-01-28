@@ -1,7 +1,7 @@
 use alloc::{sync::Arc, string::String, vec::Vec};
 use alloc::collections::VecDeque;
 use bitflags::*;
-use super::{File, DirFile};
+use super::{File, DirFile, RegularFile, LinkFile};
 use crate::utils::ErrorNum;
 
 bitflags! {
@@ -16,14 +16,12 @@ bitflags! {
 }
 
 pub trait VirtualFileSystem : Send + Sync {
-    fn open(&self, abs_path: &Path, mode: OpenMode) -> Result<Arc<dyn File>, ErrorNum>;
-    fn open_dir(&self, src_dir: Arc<dyn DirFile>, rel_path: &Path, mode: OpenMode) -> Result<Arc<dyn File>, ErrorNum>;
-    fn mkdir(&self, abs_path: &Path) -> Result<Arc<dyn File>, ErrorNum>;
-    fn mkfile(&self, abs_path: &Path) -> Result<Arc<dyn File>, ErrorNum>;
-    fn remove(&self, abs_path: &Path) -> Result<(), ErrorNum>;
-    fn link(&self, to_link: Arc<dyn File>, dest: &Path) -> Result<(), ErrorNum>;
-    fn sym_link(&self, abs_src: Path, rel_dst: &Path) -> Result<(), ErrorNum>;
-    fn rename(&self, to_rename: Arc<dyn File>, new_name: String) -> Result<(), ErrorNum>;
+    fn open(&self, path: &Path, mode: OpenMode) -> Result<Arc<dyn File>, ErrorNum>;
+    fn mkdir(&self, path: &Path) -> Result<Arc<dyn DirFile>, ErrorNum>;
+    fn mkfile(&self, path: &Path) -> Result<Arc<dyn RegularFile>, ErrorNum>;
+    fn remove(&self, path: &Path) -> Result<(), ErrorNum>;
+    fn link(&self, dest: Arc<dyn File>, link_file: &Path) -> Result<Arc<dyn File>, ErrorNum>;
+    fn sym_link(&self, abs_src: &Path, rel_dst: &Path) -> Result<Arc<dyn LinkFile>, ErrorNum>;
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -32,20 +30,7 @@ pub struct Path {
 }
 
 impl Path {
-    pub fn new(path: String) -> Self {
-        let mut list: VecDeque<String> = path.split('/').map(|s| String::from(s)).collect();
-        if path.starts_with('/') {
-            list.pop_front();
-        }
-        if path.ends_with('/') {
-            list.pop_back();
-        }
-        Self {
-            components: list.into()
-        }
-    }
-
-    pub fn new_secure(path: String) -> Result<Self, ErrorNum> {
+    pub fn new(path: String) -> Result<Self, ErrorNum> {
         let mut list: VecDeque<String> = path.split('/').map(|s| String::from(s)).collect();
         if path.starts_with('/') {
             list.pop_front();
@@ -101,6 +86,6 @@ impl Path {
 
 impl From<&str> for Path {
     fn from(s: &str) -> Self {
-        Self::new(String::from(s))
+        Self::new(String::from(s)).unwrap()
     }
 }

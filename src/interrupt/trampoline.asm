@@ -34,7 +34,7 @@
 # kernel.ld causes this to be aligned
 	# to a page boundary.
 	#
-.section trampsec
+.section .text.trampoline
 .globl trampoline
 trampoline:
 .align 4

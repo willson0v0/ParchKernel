@@ -1,4 +1,4 @@
-use core::panic;
+use core::{panic};
 
 use riscv::register::{scause::{   // s cause register
         self,
@@ -28,7 +28,7 @@ pub fn kernel_trap() {
     let sstatus = sstatus::read();
 
     assert!(sstatus.spp() == SPP::Supervisor, "kerneltrap not from supervisor mode");
-    assert!(sstatus.sie(), "kernel interrupt is enabled");
+    assert!(!sstatus.sie(), "kernel interrupt is enabled");
 
     match scause.cause() {
         // PLIC interrupt
@@ -55,7 +55,39 @@ pub fn kernel_trap() {
             }
         },
         _ => {
-            panic!("Unexpected scause")
+            fatal!("Unexpected scause:");
+            match scause.cause() {
+                Trap::Exception(exception) => {
+                    match exception {
+                        Exception::InstructionMisaligned => fatal!("Exception::InstructionMisaligned"),
+                        Exception::InstructionFault      => fatal!("Exception::InstructionFault     "),
+                        Exception::IllegalInstruction    => fatal!("Exception::IllegalInstruction   "),
+                        Exception::Breakpoint            => fatal!("Exception::Breakpoint           "),
+                        Exception::LoadFault             => fatal!("Exception::LoadFault            "),
+                        Exception::StoreMisaligned       => fatal!("Exception::StoreMisaligned      "),
+                        Exception::StoreFault            => fatal!("Exception::StoreFault           "),
+                        Exception::UserEnvCall           => fatal!("Exception::UserEnvCall          "),
+                        Exception::InstructionPageFault  => fatal!("Exception::InstructionPageFault "),
+                        Exception::LoadPageFault         => fatal!("Exception::LoadPageFault        "),
+                        Exception::StorePageFault        => fatal!("Exception::StorePageFault       "),
+                        Exception::Unknown               => fatal!("Exception::Unknown              "),
+                    }
+                },
+                Trap::Interrupt(interrupt) => {
+                    match interrupt {
+                        Interrupt::UserSoft             => fatal!("Interrupt::UserSoft             "),
+                        Interrupt::SupervisorSoft       => fatal!("Interrupt::SupervisorSoft       "),
+                        Interrupt::UserTimer            => fatal!("Interrupt::UserTimer            "),
+                        Interrupt::SupervisorTimer      => fatal!("Interrupt::SupervisorTimer      "),
+                        Interrupt::UserExternal         => fatal!("Interrupt::UserExternal         "),
+                        Interrupt::SupervisorExternal   => fatal!("Interrupt::SupervisorExternal   "),
+                        Interrupt::Unknown              => fatal!("Interrupt::Unknown              "),
+                    }
+                }
+            }
+            fatal!("STVAL: {:x}", stval);
+            fatal!("SEPC : {:x}", sepc::read());
+            panic!("Kernel panic");
         }
     }
 }

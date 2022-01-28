@@ -1,11 +1,10 @@
-use crate::{utils::{Mutex, SpinMutex}};
+use crate::{utils::{Mutex, SpinMutex}, config::PAGE_SIZE};
 use alloc::sync::Arc;
 use lazy_static::*;
 use super::{PhysAddr, phys_bitmap::BitMap, types::PhysPageNum};
 
 extern "C" {
 	fn ekernel();
-	fn INODE_BITMAP_ADDR();
 	fn BASE_ADDRESS();
 	fn PHYS_END_ADDRESS ();
 	fn SUPERBLOCK_ADDRESS();
@@ -21,7 +20,7 @@ lazy_static!{
 			"PageAllocator", 
 			BitMapPageAllocator::new(
 				(ekernel as usize).into(),
-				(INODE_BITMAP_ADDR as usize) - (ekernel as usize)
+				(INODE_BITMAP_ADDRESS as usize) - (ekernel as usize)
 			)
 		)
 	};
@@ -63,10 +62,10 @@ pub struct BitMapPageAllocator {
 impl BitMapPageAllocator {
 	fn mark_unavailable(&mut self, ppn: PhysPageNum, is_exec: bool) {
 		let index = ppn - PhysPageNum::from(BASE_ADDRESS as usize);
+		assert!(!self.bitmap_fs.get(index), "Already allocated");
 		if is_exec {
 			self.bitmap_mm.set(index);
 		}
-		assert!(!self.bitmap_mm.get(index), "Already allocated");
 		self.bitmap_fs.set(index);
 	}
 
@@ -102,27 +101,27 @@ impl PageAllocator for BitMapPageAllocator {
 		// TODO: Fill with junk like xv6?
 		// first_empty in fs, for fs occupy pages too
 		self.bitmap_fs.first_empty().and_then(
-			|ppn: usize| -> Option<PhysPageNum> {
-				let index = ppn - BASE_ADDRESS as usize;
+			|block_id: usize| -> Option<PhysPageNum> {
 				if is_exec {
-					assert!(!self.bitmap_mm.get(index), "Already allocated as exec");
+					assert!(!self.bitmap_mm.get(block_id), "Already allocated as exec");
 				}
-				assert!(!self.bitmap_fs.get(index), "Already allocated as fs");
-				self.mark_unavailable(ppn.into(), is_exec);
-				Some(ppn.into())
+				assert!(!self.bitmap_fs.get(block_id), "Already allocated as fs");
+				let ppn = PhysPageNum::from(PhysAddr::from(BASE_ADDRESS as usize)) + block_id;
+				self.mark_unavailable(ppn, is_exec);
+				Some(ppn)
 			}
 		)
     }
 
     fn free(&mut self, to_free: PhysPageNum, is_exec: bool) {
 		// TODO: Fill with junk like xv6?
-		let index = to_free - PhysPageNum::from(BASE_ADDRESS as usize);
+		let block_id = to_free - PhysPageNum::from(PhysAddr::from(BASE_ADDRESS as usize));
 		if is_exec {
-			assert!(self.bitmap_mm.get(index), "Freeing non-exec page");
+			assert!(self.bitmap_mm.get(block_id), "Freeing non-exec page");
 		} else {
-			assert!(!self.bitmap_mm.get(index), "Freeing exec page");
+			assert!(!self.bitmap_mm.get(block_id), "Freeing exec page");
 		}
-		assert!(self.bitmap_fs.get(index), "Freeing free page");
+		assert!(self.bitmap_fs.get(block_id), "Freeing free page");
         self.mark_available(to_free, is_exec);
     }
 

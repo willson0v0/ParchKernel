@@ -141,7 +141,11 @@ impl BitMapIndex {
         } else {
             for i in 0..64 {
                 if !self.get_bit(i) {
-                    return Some(self.subentry_capacity() * i + self.sub_entries[i].acquire().first_empty().unwrap());
+                    if self.level != 0 {
+                        return Some(self.subentry_capacity() * i + self.sub_entries[i].acquire().first_empty().unwrap());
+                    } else {
+                        return Some(i);
+                    }
                 }
             }
             unreachable!()
@@ -229,7 +233,7 @@ impl BitMap {
             |arr_index: usize| -> Option<usize> {
                 for i in 0..64 {
                     let pos = arr_index * 64 + i;
-                    if self.raw_get(pos) {
+                    if !self.raw_get(pos) {
                         return Some(pos);
                     }
                 }

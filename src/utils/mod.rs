@@ -5,6 +5,7 @@ mod uart;
 mod lock;
 mod time;
 mod error;
+pub mod range;
 
 pub use lock::{
     SpinMutex,

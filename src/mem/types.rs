@@ -4,6 +4,7 @@ use core::ops;
 use core::ptr::{read_volatile, write_volatile};
 
 use crate::config::PAGE_OFFSET;
+use crate::utils::range::{StepUp, StepDown, Range};
 
 #[repr(C)]
 #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
@@ -278,3 +279,56 @@ impl VirtPageNum {
         ];
     }
 }
+
+impl StepUp for VirtAddr {
+    fn step_up(&mut self) {
+        self.0 += 1;
+    }
+}
+
+impl StepDown for VirtAddr {
+    fn step_down(&mut self) {
+        self.0 -= 1;
+    }
+}
+
+impl StepUp for PhysAddr {
+    fn step_up(&mut self) {
+        self.0 += 1;
+    }
+}
+
+impl StepDown for PhysAddr {
+    fn step_down(&mut self) {
+        self.0 -= 1;
+    }
+}
+
+impl StepUp for VirtPageNum {
+    fn step_up(&mut self) {
+        self.0 += 1;
+    }
+}
+
+impl StepDown for VirtPageNum {
+    fn step_down(&mut self) {
+        self.0 -= 1;
+    }
+}
+
+impl StepUp for PhysPageNum {
+    fn step_up(&mut self) {
+        self.0 += 1;
+    }
+}
+
+impl StepDown for PhysPageNum {
+    fn step_down(&mut self) {
+        self.0 -= 1;
+    }
+}
+
+pub type VARange = Range<VirtAddr>;
+pub type PARange = Range<PhysAddr>;
+pub type VPNRange = Range<VirtPageNum>;
+pub type PPNRange = Range<PhysPageNum>;

@@ -1,7 +1,7 @@
 use alloc::collections::BTreeMap;
 use alloc::sync::Arc;
 use crate::utils::{SpinMutex, ErrorNum};
-use super::{Path, VirtualFileSystem, File, vfs::OpenMode};
+use super::{Path, VirtualFileSystem, File, vfs::OpenMode, DirFile, RegularFile, LinkFile};
 
 struct MountManager{
     inner: SpinMutex<MountManagerInner>
@@ -68,5 +68,37 @@ impl MountManagerInner {
     pub fn open(&self, path: &Path, mode: OpenMode) -> Result<Arc<dyn File>, ErrorNum> {
         let (fs, rel_path) = self.parse(path);
         fs.open(&rel_path, mode)
+    }
+    
+    pub fn mkdir(&self, path: &Path) -> Result<Arc<dyn DirFile>, ErrorNum> {
+        let (fs, rel_path) = self.parse(path);
+        fs.mkdir(&rel_path)
+    }
+    
+    pub fn mkfile(&self, path: &Path) -> Result<Arc<dyn RegularFile>, ErrorNum> {
+        let (fs, rel_path) = self.parse(path);
+        fs.mkfile(&rel_path)
+    }
+
+    pub fn remove(&self, path: &Path) -> Result<(), ErrorNum> {
+        let (fs, rel_path) = self.parse(path);
+        fs.remove(&rel_path)
+    }
+
+    fn link(&self, dest: Arc<dyn File>, link_file: &Path) -> Result<Arc<dyn File>, ErrorNum>{
+        let (fs, rel_path) = self.parse(link_file);
+        if !Arc::ptr_eq(&dest.vfs(), &fs) {
+            return Err(ErrorNum::EXDEV);
+        }
+        fs.link(dest, &rel_path)
+    }
+
+    fn sym_link(&self, src: &Path, dst: &Path) -> Result<Arc<dyn LinkFile>, ErrorNum>{
+        let (fs, rel_path) = self.parse(dst);
+        // sanity check
+        if self.open(src, OpenMode::SYS).is_err() {
+            return Err(ErrorNum::ENOENT);
+        }
+        fs.sym_link(src, &rel_path)
     }
 }

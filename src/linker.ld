@@ -18,10 +18,17 @@ SECTIONS
         *(.text.entry)
         *(.text .text.*)
         . = ALIGN(0x1000);
-        _trampoline = .;
-        *(trampsec)
-        . = ALIGN(0x1000);
-        ASSERT(. - _trampoline == 0x1000, "error: trampoline larger than one page");
+        strampoline = .;
+        *(.text.trampoline);
+        *(.text.trampoline_rust);
+        . = ALIGN(4K);
+        etrampoline = .;
+        sutrampoline = .;
+        *(.text.u_trampoline);
+        *(.text.u_trampoline_rust);
+        . = ALIGN(4K);
+        eutrampoline = .;
+        *(.text .text.*)
     }
 
     . = ALIGN(4K);
@@ -40,6 +47,7 @@ SECTIONS
 
     . = ALIGN(4K);
     edata = .;
+    sbss_with_stack = .;
     .bss : {
         *(.bss.stack)
         sbss = .;
