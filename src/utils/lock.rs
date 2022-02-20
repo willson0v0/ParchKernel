@@ -1,5 +1,6 @@
-use core::borrow::BorrowMut;
+use core::borrow::{BorrowMut, Borrow};
 use core::cell::{RefCell, UnsafeCell};
+use core::fmt::{self, Debug, Formatter};
 use core::ops::{Deref, DerefMut};
 use core::sync::atomic::{Ordering, AtomicBool};
 use core::option::Option;
@@ -36,7 +37,6 @@ impl<T> Drop for MutexGuard<'_, T> {
     }
 }
 
-#[derive(Debug)]
 pub struct SpinMutex<T> {
     is_acquired  : AtomicBool,
     name        : String,

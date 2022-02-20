@@ -61,7 +61,7 @@ pub struct BitMapPageAllocator {
 
 impl BitMapPageAllocator {
 	fn mark_unavailable(&mut self, ppn: PhysPageNum, is_exec: bool) {
-		let index = ppn - PhysPageNum::from(BASE_ADDRESS as usize);
+		let index = ppn - PhysPageNum::from(PhysAddr::from(BASE_ADDRESS as usize));
 		assert!(!self.bitmap_fs.get(index), "Already allocated");
 		if is_exec {
 			self.bitmap_mm.set(index);
@@ -80,6 +80,7 @@ impl BitMapPageAllocator {
 
 impl PageAllocator for BitMapPageAllocator {
     fn new(begin: PhysAddr, length: usize) -> Self {
+		verbose!("Initializeing BitMapPageAllocator");
         let mut res = Self {
 			bitmap_mm: BitMap::new((PAGE_BITMAP_MM_ADDRESS as usize).into(), PAGE_BITMAP_FS_ADDRESS as usize - PAGE_BITMAP_MM_ADDRESS as usize),
 			bitmap_fs: BitMap::new((PAGE_BITMAP_FS_ADDRESS as usize).into(), SUPERBLOCK_ADDRESS as usize - PAGE_BITMAP_FS_ADDRESS as usize)
@@ -94,11 +95,11 @@ impl PageAllocator for BitMapPageAllocator {
 			i += 1;
 		}
 
+		debug!("BitMapPageAllocator initialized.");
 		res
     }
 
     fn alloc(&mut self, is_exec: bool) -> Option<PhysPageNum> {
-		// TODO: Fill with junk like xv6?
 		// first_empty in fs, for fs occupy pages too
 		self.bitmap_fs.first_empty().and_then(
 			|block_id: usize| -> Option<PhysPageNum> {
@@ -107,14 +108,15 @@ impl PageAllocator for BitMapPageAllocator {
 				}
 				assert!(!self.bitmap_fs.get(block_id), "Already allocated as fs");
 				let ppn = PhysPageNum::from(PhysAddr::from(BASE_ADDRESS as usize)) + block_id;
+				// verbose!("Alloced: {:?}", ppn);
 				self.mark_unavailable(ppn, is_exec);
+				unsafe{ppn.clear_content()}
 				Some(ppn)
 			}
 		)
     }
 
     fn free(&mut self, to_free: PhysPageNum, is_exec: bool) {
-		// TODO: Fill with junk like xv6?
 		let block_id = to_free - PhysPageNum::from(PhysAddr::from(BASE_ADDRESS as usize));
 		if is_exec {
 			assert!(self.bitmap_mm.get(block_id), "Freeing non-exec page");
@@ -122,7 +124,9 @@ impl PageAllocator for BitMapPageAllocator {
 			assert!(!self.bitmap_mm.get(block_id), "Freeing exec page");
 		}
 		assert!(self.bitmap_fs.get(block_id), "Freeing free page");
+		unsafe{to_free.clear_content();}
         self.mark_available(to_free, is_exec);
+		verbose!("Freed: {:?}", to_free)
     }
 
     fn claim(&mut self, to_claim: PhysPageNum, is_exec: bool) {
@@ -130,8 +134,17 @@ impl PageAllocator for BitMapPageAllocator {
     }
 }
 
+#[deprecated]
 pub fn alloc_page(is_exec: bool) -> PageGuard {
 	PageGuard::new(PageGuardInner::new(PAGE_ALLOCATOR.acquire().alloc(is_exec).unwrap(), is_exec))
+}
+
+pub fn alloc_vm_page() -> PageGuard {
+	PageGuard::new(PageGuardInner::new(PAGE_ALLOCATOR.acquire().alloc(true).unwrap(), true))
+}
+
+pub fn alloc_fs_page() -> PageGuard {
+	PageGuard::new(PageGuardInner::new(PAGE_ALLOCATOR.acquire().alloc(false).unwrap(), false))
 }
 
 pub fn claim_page(to_claim: PhysPageNum, is_exec: bool) -> PageGuard {

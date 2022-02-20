@@ -49,6 +49,7 @@ use crate::utils::Mutex;
 
 pub fn init() {
     init_kernel_heap();
+    verbose!("Kernel heap activated");
     extern "C" {
         fn sbss();
         fn ebss();

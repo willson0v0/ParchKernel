@@ -68,7 +68,7 @@ pub fn print(args: fmt::Arguments) {
 #[macro_export]
 macro_rules! print {
     ($($arg:tt)*) => {
-        $crate::utils::print(format_args!($($arg)*));
+        $crate::utils::print(format_args!($($arg)*))
     }
 }
 
@@ -181,49 +181,56 @@ pub fn log(log_level: LogLevel, args: fmt::Arguments) {
 #[macro_export]
 macro_rules! verbose {
     ($($arg:tt)*) => {
-        $crate::utils::log($crate::utils::LogLevel::Verbose, format_args!($($arg)*));
+        $crate::utils::log($crate::utils::LogLevel::Verbose, format_args!($($arg)*))
     }
 }
 
 #[macro_export]
 macro_rules! debug {
     ($($arg:tt)*) => {
-        $crate::utils::log($crate::utils::LogLevel::Debug, format_args!($($arg)*));
+        $crate::utils::log($crate::utils::LogLevel::Debug, format_args!($($arg)*))
     }
 }
 
 #[macro_export]
 macro_rules! info {
     ($($arg:tt)*) => {
-        $crate::utils::log($crate::utils::LogLevel::Info, format_args!($($arg)*));
+        $crate::utils::log($crate::utils::LogLevel::Info, format_args!($($arg)*))
     }
 }
 
 #[macro_export]
 macro_rules! warning {
     ($($arg:tt)*) => {
-        $crate::utils::log($crate::utils::LogLevel::Warning, format_args!($($arg)*));
+        $crate::utils::log($crate::utils::LogLevel::Warning, format_args!($($arg)*))
     }
 }
 
 #[macro_export]
 macro_rules! error {
     ($($arg:tt)*) => {
-        $crate::utils::log($crate::utils::LogLevel::Error, format_args!($($arg)*));
+        $crate::utils::log($crate::utils::LogLevel::Error, format_args!($($arg)*))
     }
 }
 
 #[macro_export]
 macro_rules! milestone {
     ($($arg:tt)*) => {
-        $crate::utils::log($crate::utils::LogLevel::Milestone, format_args!($($arg)*));
+        $crate::utils::log($crate::utils::LogLevel::Milestone, format_args!($($arg)*))
     }
 }
 
 #[macro_export]
 macro_rules! fatal {
     ($($arg:tt)*) => {
-        $crate::utils::log($crate::utils::LogLevel::Fatal, format_args!($($arg)*));
+        $crate::utils::log($crate::utils::LogLevel::Fatal, format_args!($($arg)*))
+    }
+}
+
+#[macro_export]
+macro_rules! log {
+    ($lvl:tt, $($arg:tt)*) => {
+        $crate::utils::log($lvl, format_args!($($arg)*));
     }
 }
 

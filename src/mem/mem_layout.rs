@@ -1,6 +1,8 @@
+use core::arch::asm;
+
 use alloc::{vec::Vec, sync::Arc, boxed::Box};
-use riscv::register::satp;
-use crate::{utils::{SpinMutex, Mutex}, config::{TRAMPOLINE_ADDR, PHYS_END_ADDR, MMIO_RANGES}, mem::{PhysAddr, TrampolineSegment, UTrampolineSegment, TrapContextSegment, IdenticalMappingSegment, segment::SegmentFlags, VirtAddr, types::VPNRange}};
+use riscv::register::{satp, satp::Mode};
+use crate::{utils::{SpinMutex, Mutex, LogLevel}, config::{TRAMPOLINE_ADDR, PHYS_END_ADDR, MMIO_RANGES}, mem::{PhysAddr, TrampolineSegment, UTrampolineSegment, TrapContextSegment, IdenticalMappingSegment, segment::SegmentFlags, VirtAddr, types::VPNRange}};
 use lazy_static::*;
 use super::{PageTable, Segment, PTEFlags};
 
@@ -34,14 +36,17 @@ impl MemLayout {
             fn ebss();
             fn ekernel();
         }
-        
         // trampoline
+        verbose!("Registering Trampoline...");
         layout.add_segment(TrampolineSegment::new());
         // u_trampoline
+        verbose!("Registering UTrampoline...");
         layout.add_segment(UTrampolineSegment::new());
         // trap_context
+        verbose!("Registering TrapContext...");
         layout.add_segment(TrapContextSegment::new());
         // text
+        verbose!("Registering Kernel text...");
         layout.add_segment(
             IdenticalMappingSegment::new(
                 VPNRange::new(
@@ -52,6 +57,7 @@ impl MemLayout {
             )
         );
         // rodata
+        verbose!("Registering Kernel rodata...");
         layout.add_segment(
             IdenticalMappingSegment::new(
                 VPNRange::new(
@@ -62,6 +68,7 @@ impl MemLayout {
             )
         );
         // data
+        verbose!("Registering Kernel data...");
         layout.add_segment(
             IdenticalMappingSegment::new(
                 VPNRange::new(
@@ -72,6 +79,7 @@ impl MemLayout {
             )
         );
         // bss
+        verbose!("Registering Kernel bss...");
         layout.add_segment(
             IdenticalMappingSegment::new(
                 VPNRange::new(
@@ -82,6 +90,7 @@ impl MemLayout {
             )
         );
         // Physical memories
+        verbose!("Registering Physical memory...");
         layout.add_segment(
             IdenticalMappingSegment::new(
                 VPNRange::new(
@@ -92,6 +101,7 @@ impl MemLayout {
             )
         );
         // MMIOS (CLINT etc.)
+        verbose!("Registering MMIO...");
         for (start, end) in MMIO_RANGES {
             layout.add_segment(
                 IdenticalMappingSegment::new(
@@ -105,6 +115,7 @@ impl MemLayout {
         }
 
         // XXX: do_map here, or later?
+        verbose!("Mapping all segment into pagetable...");
         layout.do_map();
 
         layout
@@ -116,11 +127,15 @@ impl MemLayout {
 
     pub fn do_map(&mut self) {
         for seg in self.segments.iter() {
-            seg.acquire().do_map(&mut self.pagetable);
+            let mut seg_locked = seg.acquire();
+            verbose!("Now mapping {:?} ...", seg_locked.as_ref());
+            seg_locked.do_map(&mut self.pagetable);
+            debug!("Done mapping {:?}.", seg_locked.as_ref());
         }
     }
 
     pub fn activate(&self) {
+        debug!("Activating pagetable @ 0x{:x}", self.pagetable.satp());
         let satp = self.pagetable.satp();
         unsafe {
             satp::write(satp);

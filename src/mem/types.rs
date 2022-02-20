@@ -3,7 +3,7 @@ use core::fmt::{self, Debug, Formatter};
 use core::ops;
 use core::ptr::{read_volatile, write_volatile};
 
-use crate::config::PAGE_OFFSET;
+use crate::config::{PAGE_OFFSET, PAGE_SIZE};
 use crate::utils::range::{StepUp, StepDown, Range};
 
 #[repr(C)]
@@ -129,7 +129,7 @@ impl PhysAddr {
         if self.0 == 0 {
             1.into()
         } else {
-            PhysPageNum((self.0 - 1) >> PAGE_OFFSET + 1)
+            PhysPageNum(((self.0 - 1) >> PAGE_OFFSET) + 1)
         }
     }
 }
@@ -147,7 +147,7 @@ impl VirtAddr {
         if self.0 == 0 {
             1.into()
         } else {
-            VirtPageNum((self.0 - 1) >> PAGE_OFFSET + 1)
+            VirtPageNum(((self.0 - 1) >> PAGE_OFFSET) + 1)
         }
     }
 }
@@ -332,3 +332,19 @@ pub type VARange = Range<VirtAddr>;
 pub type PARange = Range<PhysAddr>;
 pub type VPNRange = Range<VirtPageNum>;
 pub type PPNRange = Range<PhysPageNum>;
+
+impl PhysPageNum {
+    pub unsafe fn clear_content(&self) {
+        for i in 0..PAGE_SIZE {
+            (PhysAddr::from(*self) + i).write_volatile(&0u8);
+        }
+    }
+}
+
+impl VirtPageNum {
+    pub unsafe fn clear_content(&self) {
+        for i in 0..PAGE_SIZE {
+            (VirtAddr::from(*self) + i).write_volatile(&0u8);
+        }
+    }
+}

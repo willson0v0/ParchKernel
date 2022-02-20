@@ -1,3 +1,5 @@
+use core::arch::asm;
+
 use alloc::string::ToString;
 use riscv::register::{
     sstatus,

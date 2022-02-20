@@ -1,5 +1,9 @@
+use _core::mem::size_of;
 use alloc::vec::Vec;
 use bitflags::*;
+use core::fmt::{self, Debug, Formatter};
+
+use crate::{utils::LogLevel, config::PAGE_SIZE};
 
 use super::{PageGuard, PhysAddr, alloc_page, types::{PhysPageNum, VirtPageNum}};
 
@@ -39,6 +43,12 @@ pub struct PageTableEntry {
     pub bits: usize
 }
 
+impl Debug for PageTableEntry {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.write_fmt(format_args!("PTE for {:?}, {:?}", self.ppn(), self.flags()))
+    }
+}
+
 impl PageTableEntry {
 	pub fn new(ppn: PhysPageNum, flags: PTEFlags) -> Self {
 		Self {
@@ -57,7 +67,7 @@ impl PageTableEntry {
 
     pub fn set_ppn(&mut self, ppn: PhysPageNum) {
         let mask: usize = 0x003FFFFFFFFFC00;
-        self.bits = (self.bits & (!mask)) | (ppn.0 << 12)
+        self.bits = (self.bits & (!mask)) | (ppn.0 << 10)
     }
 
 	pub fn ppn(&self) -> PhysPageNum {
@@ -123,6 +133,28 @@ impl PageTable {
         }
     }
 
+    fn print_ptes(&self, page_addr: PhysPageNum, idx: [usize; 3], indentation: usize, log_level: LogLevel) {
+        for i in 0..(PAGE_SIZE / size_of::<PageTableEntry>()) {
+            let pte_addr = PhysAddr::from(page_addr) + i * size_of::<PageTableEntry>();
+            let pte_content = unsafe{pte_addr.read_volatile::<PageTableEntry>()};
+            if pte_content.valid() {
+                if indentation < 3 {
+                    log!(log_level, "{}|--- {:?} => non-leaf", "|   ".repeat(indentation-1), pte_content);
+                    let mut new_idx = idx;
+                    new_idx[indentation-1] = i;
+                    self.print_ptes(pte_content.ppn(), new_idx, indentation + 1, log_level);
+                } else {
+                    log!(log_level, "{}|--- {:?} => vpn 0x{:x}", "|   ".repeat(indentation-1), pte_content, (idx[0] << 18) + (idx[1] << 9) + i);
+                }
+            }
+        }
+    }
+
+    pub fn print(&self, log_level: LogLevel) {
+        log!(log_level, "Pagetable @ 0x{:x}", self.satp());
+        self.print_ptes(self.root_ppn, [0,0,0], 1, log_level);
+    }
+
     pub fn satp(&self) -> usize {
         8usize << 60 | self.root_ppn.0
     }
@@ -139,7 +171,7 @@ impl PageTable {
         let indexes = vpn.indexes();
         let mut pt_ppn = self.root_ppn;
         for i in 0..3 {
-            let pte_addr = PhysAddr::from(pt_ppn) + indexes[i];
+            let pte_addr = PhysAddr::from(pt_ppn) + indexes[i] * size_of::<PageTableEntry>();
             if i == 2 {
                 return Some(pte_addr);
             }
@@ -149,8 +181,8 @@ impl PageTable {
                     let pg = alloc_page(true);
                     pte_content.bits = 0;
                     pte_content.set_ppn(pg.ppn);
-                    pte_content.set_flags(PTEFlags::empty());   // not leaf
-                    unsafe{pte_addr.write_volatile(&pte_content);}
+                    pte_content.set_flags(PTEFlags::V);   // not leaf
+                    unsafe{pte_addr.write_volatile(&pte_content);}  // TODO: Switch this off on testing
                     self.pages.push(pg);
                 } else {
                     return None;
@@ -162,8 +194,9 @@ impl PageTable {
     }
 
     pub fn map(&mut self, vpn: VirtPageNum, ppn: PhysPageNum, flags: PTEFlags) {
+        // verbose!("Mapping {:?} -> {:?} with flag {:?}...", vpn, ppn, flags);
         let pte_addr = self.walk(vpn, true).unwrap();
-        let pte_content = PageTableEntry::new(ppn, flags);
+        let pte_content = PageTableEntry::new(ppn, flags | PTEFlags::V);
         unsafe{pte_addr.write_volatile(&pte_content);}
     }
 

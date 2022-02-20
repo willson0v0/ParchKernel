@@ -1,13 +1,11 @@
 #![no_std]
 #![no_main]
-#![feature(asm)]
-#![feature(global_asm)]
 #![feature(alloc_error_handler)]
 #![feature(exclusive_range_pattern)]
 #![feature(panic_info_message)]
 #![feature(format_args_capture)]
 #![feature(step_trait)]
-#![feature(step_trait_ext)]
+#![allow(dead_code)]
 
 #[macro_use]
 mod utils;
@@ -20,19 +18,21 @@ mod fs;
 #[macro_use]
 extern crate alloc;
 extern crate lazy_static;
+extern crate static_assertions;
+
+use core::{panic, arch::{global_asm, asm}};
 
 global_asm!(include_str!("crt_setup.asm"));
 global_asm!(include_str!("interrupt/kernel_trap.asm"));
 global_asm!(include_str!("interrupt/trampoline.asm"));
 
-use core::panic;
 
 use riscv::register::{medeleg, mepc, mhartid, mideleg, mie, mscratch, mstatus, mtvec, pmpaddr0, pmpcfg0, satp, sie, sstatus, stvec};
 
 static mut MSCRATCH_ARR: [[usize; 6]; config::MAX_CPUS] = [[0; 6]; config::MAX_CPUS];
 
 #[no_mangle]
-extern "C" fn genesis_m() {
+extern "C" fn genesis_m() -> ! {
     // set mstatus previous privilege
     extern "C" {
         fn genesis_s();
@@ -87,10 +87,10 @@ extern "C" fn genesis_m() {
         MSCRATCH_ARR[hart_id][4] = (config::CLINT_ADDR + 0x4000 + 8 * hart_id).0;
         MSCRATCH_ARR[hart_id][5] = config::CLOCK_FREQ / config::TIMER_FRAC;
         mscratch::write(MSCRATCH_ARR[hart_id].as_ptr() as usize);
-        // only enableling timer interrupt so should be fine
         mtvec::write(timervec as usize, mtvec::TrapMode::Direct);
-        mstatus::set_mie();
+        // only enableling timer interrupt so should be fine
         mie::set_mtimer();
+        mstatus::set_mie();
         // set thread pointer and return
         asm! {
             "mv tp, {0}",

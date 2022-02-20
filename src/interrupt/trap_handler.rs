@@ -1,4 +1,4 @@
-use core::{panic};
+use core::{panic, arch::asm};
 
 use riscv::register::{scause::{   // s cause register
         self,
@@ -53,6 +53,7 @@ pub fn kernel_trap() {
                     in(reg) cleared_sip
                 };
             }
+            assert!(sip::read().bits() & 2 == 0, "Failed to clear ssip");
         },
         _ => {
             fatal!("Unexpected scause:");

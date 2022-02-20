@@ -1,3 +1,4 @@
+use core::fmt::{self, Debug, Formatter};
 use alloc::{sync::{Arc}, collections::BTreeMap, boxed::Box};
 use bitflags::*;
 use crate::{fs::{File, RegularFile}, utils::ErrorNum, config::{TRAMPOLINE_ADDR, U_TRAMPOLINE_ADDR, TRAP_CONTEXT_ADDR}};
@@ -43,7 +44,7 @@ pub enum SegmentType {
 }
 
 
-pub trait Segment {
+pub trait Segment: Debug {
     fn as_segment   <'a>(self: Arc<Self>) -> Arc<dyn Segment + 'a> where Self: 'a;
     fn as_identical <'a>(self: Arc<Self>) -> Result<Arc<IdenticalMappingSegment >, ErrorNum> where Self: 'a;
     fn as_managed   <'a>(self: Arc<Self>) -> Result<Arc<ManagedSegment          >, ErrorNum> where Self: 'a;
@@ -83,7 +84,45 @@ pub struct UTrampolineSegment {
 }
 
 pub struct TrapContextSegment {
-    status: SegmentStatus
+    status: SegmentStatus,
+    page: Option<PageGuard>
+}
+
+impl Debug for IdenticalMappingSegment {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.write_fmt(format_args!("{:?} Identical segment {:?} ~ {:?} with flag {:?}", self.status, self.range.start(), self.range.end(), self.flag))
+    }
+}
+
+impl Debug for ManagedSegment {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.write_fmt(format_args!("{:?} Managed segment {:?} ~ {:?} with flag {:?}", self.status, self.range.start(), self.range.end(), self.flag))
+    }
+}
+
+impl Debug for VMASegment {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        // TODO: Add file desc
+        f.write_fmt(format_args!("{:?} VMA segment with flag {:?}", self.status, self.flag))
+    }
+}
+
+impl Debug for TrampolineSegment {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.write_fmt(format_args!("{:?} Trampoline segment", self.status))
+    }
+}
+
+impl Debug for UTrampolineSegment {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.write_fmt(format_args!("{:?} UTrampoline segment", self.status))
+    }
+}
+
+impl Debug for TrapContextSegment {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.write_fmt(format_args!("{:?} TrapContext segment", self.status))
+    }
 }
 
 impl Segment for IdenticalMappingSegment {
@@ -322,9 +361,10 @@ impl Segment for TrapContextSegment {
         pagetable.map(
             TRAP_CONTEXT_ADDR.into(),
             ppn, 
-            PTEFlags::R | PTEFlags::X
+            PTEFlags::R | PTEFlags::W
         );
         self.status = SegmentStatus::Mapped;
+        self.page = Some(pageguard);
     }
 
     fn do_unmap(&mut self, pagetable: &mut PageTable) {
@@ -381,6 +421,6 @@ impl UTrampolineSegment {
 
 impl TrapContextSegment {
     pub fn new() -> Box<Self> {
-        Box::new(Self { status: SegmentStatus::Initialized })
+        Box::new(Self { status: SegmentStatus::Initialized, page: None })
     }
 }
