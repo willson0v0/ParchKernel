@@ -5,7 +5,7 @@ use riscv::register::{scause::{   // s cause register
         Trap,
         Exception,
         Interrupt,
-    }, sepc, sie, sip, sstatus::{self, SPP}, stval, stvec};
+    }, sepc, sip, sstatus::{self, SPP}, stval, stvec};
 
 use super::PLIC0;
 use crate::config::UART0_IRQ;

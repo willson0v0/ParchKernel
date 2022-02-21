@@ -16,5 +16,6 @@ pub use types::{
 
 pub use vfs::{
     VirtualFileSystem,
-    Path
+    Path,
+    OpenMode
 };

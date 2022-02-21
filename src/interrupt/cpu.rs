@@ -1,6 +1,6 @@
 use core::arch::asm;
 
-use alloc::string::ToString;
+
 use riscv::register::{
     sstatus,
 };
@@ -8,7 +8,8 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use lazy_static::*;
 use crate::config::MAX_CPUS;
-use crate::utils::{Mutex, SpinMutex};
+use crate::process::ProcessControlBlock;
+use crate::utils::{SpinMutex};
 
 pub struct CPUManager {
     pub cpus: Vec<Arc<SpinMutex<CPU>>>
@@ -37,16 +38,17 @@ lazy_static!{
 
 /// Struct that repersent CPU's state
 pub struct CPU {
-    // TODO: CurrentPCB
+    pub pcb: Option<ProcessControlBlock>,
     // TODO: Context for scheduler()
-    int_off_count: usize,    // depth of push_off nesting
-    int_enable_b4_off: bool,        // was interrupt enabled before push_off
-    hart_id: usize
+    pub int_off_count: usize,    // depth of push_off nesting
+    pub int_enable_b4_off: bool,        // was interrupt enabled before push_off
+    pub hart_id: usize
 }
 
 impl CPU {
     pub fn new(hart_id: usize) -> Self {
         Self {
+            pcb: None,
             int_off_count: 0,
             int_enable_b4_off: false,
             hart_id

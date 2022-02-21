@@ -5,7 +5,7 @@ use core::fmt::{self, Debug, Formatter};
 
 use crate::{utils::LogLevel, config::PAGE_SIZE};
 
-use super::{PageGuard, PhysAddr, alloc_page, types::{PhysPageNum, VirtPageNum}};
+use super::{PageGuard, PhysAddr, alloc_vm_page, types::{PhysPageNum, VirtPageNum}};
 
 bitflags! {
     /// Pagetable entry flags, indicating privileges.
@@ -126,7 +126,7 @@ pub struct PageTable {
 
 impl PageTable {
     pub fn new() -> Self {
-        let root = alloc_page(true);
+        let root = alloc_vm_page();
         Self {
             root_ppn: root.ppn,
             pages: vec![root]
@@ -167,6 +167,7 @@ impl PageTable {
     }
 
     /// create PTE for the VPN if specified, and return the PhysAddr for the PTE
+    #[deprecated]
     pub fn walk(&mut self, vpn: VirtPageNum, do_create: bool) -> Option<PhysAddr> {
         let indexes = vpn.indexes();
         let mut pt_ppn = self.root_ppn;
@@ -178,15 +179,62 @@ impl PageTable {
             let mut pte_content = unsafe{pte_addr.read_volatile::<PageTableEntry>()};
             if !pte_content.valid() {
                 if do_create {
-                    let pg = alloc_page(true);
+                    let pg = alloc_vm_page();
                     pte_content.bits = 0;
                     pte_content.set_ppn(pg.ppn);
                     pte_content.set_flags(PTEFlags::V);   // not leaf
-                    unsafe{pte_addr.write_volatile(&pte_content);}  // TODO: Switch this off on testing
+                    unsafe{
+                        pg.ppn.clear_content();
+                        pte_addr.write_volatile(&pte_content);
+                    }
                     self.pages.push(pg);
                 } else {
                     return None;
                 }
+            }
+            pt_ppn = pte_content.ppn();
+        }
+        unreachable!()
+    }
+
+    /// create PTE for the VPN if specified, and return the PhysAddr for the PTE
+    pub fn walk_create(&mut self, vpn: VirtPageNum) -> PhysAddr {
+        let indexes = vpn.indexes();
+        let mut pt_ppn = self.root_ppn;
+        for i in 0..3 {
+            let pte_addr = PhysAddr::from(pt_ppn) + indexes[i] * size_of::<PageTableEntry>();
+            if i == 2 {
+                return pte_addr;
+            }
+            let mut pte_content = unsafe{pte_addr.read_volatile::<PageTableEntry>()};
+            if !pte_content.valid() {
+                let pg = alloc_vm_page();
+                pte_content.bits = 0;
+                pte_content.set_ppn(pg.ppn);
+                pte_content.set_flags(PTEFlags::V);   // not leaf
+                unsafe{
+                    pg.ppn.clear_content();
+                    pte_addr.write_volatile(&pte_content);
+                }
+                self.pages.push(pg);
+            }
+            pt_ppn = pte_content.ppn();
+        }
+        unreachable!()
+    }
+
+    /// create PTE for the VPN if specified, and return the PhysAddr for the PTE
+    pub fn walk_find(&self, vpn: VirtPageNum) -> Option<PhysAddr> {
+        let indexes = vpn.indexes();
+        let mut pt_ppn = self.root_ppn;
+        for i in 0..3 {
+            let pte_addr = PhysAddr::from(pt_ppn) + indexes[i] * size_of::<PageTableEntry>();
+            if i == 2 {
+                return Some(pte_addr);
+            }
+            let pte_content = unsafe{pte_addr.read_volatile::<PageTableEntry>()};
+            if !pte_content.valid() {
+                return None;
             }
             pt_ppn = pte_content.ppn();
         }

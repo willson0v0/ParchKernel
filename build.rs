@@ -1,5 +1,5 @@
 use std::io::{Result, Write};
-use std::fs::{File, OpenOptions, read_dir};
+use std::fs::{OpenOptions};
 use chrono::{DateTime, Utc};
 
 fn updata_version_number() -> Result<()> {

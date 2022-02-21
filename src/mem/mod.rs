@@ -6,6 +6,8 @@ mod pagetable;
 mod mem_layout;
 mod segment;
 
+pub use phys_bitmap::BitMap;
+
 pub use mem_layout::{
     MemLayout,
     SCHEDULER_MEM_LAYOUT
@@ -25,7 +27,10 @@ pub use types::{
 };
 
 pub use page_allocator::{
-    alloc_page,
+    alloc_vm_page,
+    alloc_fs_page,
+    claim_vm_page,
+    claim_fs_page,
     PageGuard
 };
 
@@ -36,7 +41,8 @@ pub use segment::{
     VMASegment,
     TrampolineSegment,
     UTrampolineSegment,
-    TrapContextSegment
+    TrapContextSegment,
+    SegmentFlags
 };
 
 pub use pagetable::{

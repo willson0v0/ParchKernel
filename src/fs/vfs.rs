@@ -1,7 +1,9 @@
+use core::fmt::{Debug, Formatter};
 use alloc::{sync::Arc, string::String, vec::Vec};
 use alloc::collections::VecDeque;
 use bitflags::*;
 use super::{File, DirFile, RegularFile, LinkFile};
+use crate::mem::SegmentFlags;
 use crate::utils::ErrorNum;
 
 bitflags! {
@@ -10,8 +12,28 @@ bitflags! {
         const READ      = 1 << 0;
         const WRITE     = 1 << 1;
         const CREATE    = 1 << 2;
-        const SYS       = 1 << 3;   // special access: opened by kernel
+        const EXEC      = 1 << 3;
+        const SYS       = 1 << 4;   // special access: opened by kernel
         const NO_FOLLOW = 1 << 5;   // do not follow symbolic link
+    }
+}
+
+impl Into<SegmentFlags> for OpenMode {
+    fn into(self) -> SegmentFlags {
+        if self.contains(OpenMode::SYS) {
+            return SegmentFlags::R | SegmentFlags::W | SegmentFlags::X;
+        }
+        let mut res = SegmentFlags::U;
+        if self.contains(OpenMode::READ) {
+            res |= SegmentFlags::R;
+        }
+        if self.contains(OpenMode::WRITE) {
+            res |= SegmentFlags::W;
+        }
+        if self.contains(OpenMode::EXEC) {
+            res |= SegmentFlags::X;
+        }
+        res
     }
 }
 
@@ -27,6 +49,15 @@ pub trait VirtualFileSystem : Send + Sync {
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Path {
     components  : Vec<String>
+}
+
+impl Debug for Path {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
+        for p in &self.components {
+            f.write_fmt(format_args!("/{}", p))?;
+        }
+        Ok(())
+    }
 }
 
 impl Path {

@@ -1,12 +1,13 @@
-use core::{mem::size_of};
-use lazy_static::*;
-use alloc::{sync::Arc, vec::Vec};
-use crate::utils::{Mutex, SpinMutex};
+
+
+use core::cell::RefCell;
+
+use alloc::{vec::Vec};
+
 
 use super::PhysAddr;
 
 extern "C" {
-    fn INODE_BITMAP_ADDRESS();
     fn PAGE_BITMAP_MM_ADDRESS();
     fn PAGE_BITMAP_FS_ADDRESS();
 }
@@ -20,7 +21,7 @@ pub struct BitMapIndex {
     bits: u64,
     level: usize,
     length: usize,
-    sub_entries: Vec<Arc<SpinMutex<BitMapIndex>>>,
+    sub_entries: Vec<RefCell<BitMapIndex>>,
 }
 
 impl BitMapIndex {
@@ -35,8 +36,8 @@ impl BitMapIndex {
         let level = level.unwrap();
         let mut sub_entries = Vec::new();
         if level != 0 {
-            for i in 0..(length/Self::powof64(level)) {
-                sub_entries.push(Arc::new(SpinMutex::new("BitMapIndex", Self::new(Self::powof64(level)))))
+            for _i in 0..(length/Self::powof64(level)) {
+                sub_entries.push(RefCell::new(Self::new(Self::powof64(level))))
             }
         }
         
@@ -96,7 +97,7 @@ impl BitMapIndex {
         } else {
             let entry_index = pos / self.subentry_capacity();
             let entry_offset = pos % self.subentry_capacity();
-            if self.sub_entries[entry_index].acquire().set(entry_offset) {
+            if self.sub_entries[entry_index].borrow_mut().set(entry_offset) {
                 self.set_bit(entry_index);
             }
             self.is_full()
@@ -110,7 +111,7 @@ impl BitMapIndex {
         } else {
             let entry_index = pos / self.subentry_capacity();
             let entry_offset = pos % self.subentry_capacity();
-            self.sub_entries[entry_index].acquire().clear(entry_offset);
+            self.sub_entries[entry_index].borrow_mut().clear(entry_offset);
             self.clear_bit(entry_index);
         }
     }
@@ -129,7 +130,7 @@ impl BitMapIndex {
         } else if self.level != 0 {
             let entry_index = pos / self.subentry_capacity();
             let entry_offset = pos % self.subentry_capacity();
-            self.sub_entries[entry_index].acquire().get(entry_offset)
+            self.sub_entries[entry_index].borrow_mut().get(entry_offset)
         } else {
             self.get_bit(pos)
         }
@@ -142,7 +143,7 @@ impl BitMapIndex {
             for i in 0..64 {
                 if !self.get_bit(i) {
                     if self.level != 0 {
-                        return Some(self.subentry_capacity() * i + self.sub_entries[i].acquire().first_empty().unwrap());
+                        return Some(self.subentry_capacity() * i + self.sub_entries[i].borrow_mut().first_empty().unwrap());
                     } else {
                         return Some(i);
                     }

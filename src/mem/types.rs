@@ -1,7 +1,8 @@
 
 use core::fmt::{self, Debug, Formatter};
-use core::ops;
+use core::{ops};
 use core::ptr::{read_volatile, write_volatile};
+
 
 use crate::config::{PAGE_OFFSET, PAGE_SIZE};
 use crate::utils::range::{StepUp, StepDown, Range};
@@ -125,6 +126,10 @@ impl PhysAddr {
         read_volatile(self.0 as *const T)
     }
 
+    pub unsafe fn instantiate_volatile<T>(&self) -> &'static mut T {
+        (self.0 as *mut T).as_mut().unwrap()
+    }
+
     pub fn to_ppn_ceil(&self) -> PhysPageNum {
         if self.0 == 0 {
             1.into()
@@ -141,6 +146,10 @@ impl VirtAddr {
 
     pub unsafe fn read_volatile<T: Sized>(&self) -> T {
         read_volatile(self.0 as *const T)
+    }
+
+    pub unsafe fn instantiate_volatile<T>(&self) -> &'static mut T {
+        (self.0 as *mut T).as_mut().unwrap()
     }
 
     pub fn to_vpn_ceil(&self) -> VirtPageNum {
@@ -334,6 +343,7 @@ pub type VPNRange = Range<VirtPageNum>;
 pub type PPNRange = Range<PhysPageNum>;
 
 impl PhysPageNum {
+    // FIXME: very slow
     pub unsafe fn clear_content(&self) {
         for i in 0..PAGE_SIZE {
             (PhysAddr::from(*self) + i).write_volatile(&0u8);
@@ -342,6 +352,7 @@ impl PhysPageNum {
 }
 
 impl VirtPageNum {
+    // FIXME: very slow
     pub unsafe fn clear_content(&self) {
         for i in 0..PAGE_SIZE {
             (VirtAddr::from(*self) + i).write_volatile(&0u8);

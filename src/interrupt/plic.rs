@@ -1,7 +1,7 @@
 use core::mem::size_of;
 
-use crate::{config::{UART0_IRQ, PLIC_ADDR}, mem::PhysAddr};
-use alloc::vec::{self, Vec};
+use crate::{config::{PLIC_ADDR}, mem::PhysAddr};
+use alloc::vec::{Vec};
 use super::get_hart_id;
 use lazy_static::*;
 

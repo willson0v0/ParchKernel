@@ -264,4 +264,6 @@ pub enum ErrorNum {
 
     /// Wrong vm segment type
     EWRONGSEG       = 1000,
+    /// MMap empty file
+    EEMPTY          = 1001,
 }

@@ -2,8 +2,8 @@
 
 use buddy_system_allocator::LockedHeap;
 use crate::config::KERNEL_HEAP_SIZE;
-use alloc::boxed::Box;
-use alloc::vec::Vec;
+
+
 
 /// The global allocator, enables us to use extern alloc crate.
 #[global_allocator]

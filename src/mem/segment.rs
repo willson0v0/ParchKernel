@@ -1,9 +1,11 @@
 use core::fmt::{self, Debug, Formatter};
+
 use alloc::{sync::{Arc}, collections::BTreeMap, boxed::Box};
 use bitflags::*;
-use crate::{fs::{File, RegularFile}, utils::ErrorNum, config::{TRAMPOLINE_ADDR, U_TRAMPOLINE_ADDR, TRAP_CONTEXT_ADDR}};
-
-use super::{types::{VPNRange, VirtPageNum, PhysPageNum}, PageGuard, pagetable::{PageTable, PTEFlags}, alloc_page, PhysAddr};
+use crate::config::PAGE_SIZE;
+use crate::{fs::{RegularFile, File}, utils::ErrorNum, config::{TRAMPOLINE_ADDR, U_TRAMPOLINE_ADDR, TRAP_CONTEXT_ADDR}};
+use crate::fs::OpenMode;
+use super::{types::{VPNRange, VirtPageNum, PhysPageNum}, PageGuard, pagetable::{PageTable, PTEFlags}, alloc_vm_page, PhysAddr};
 
 
 bitflags! {
@@ -144,7 +146,9 @@ impl Segment for IdenticalMappingSegment {
     }
 
     fn do_map(&mut self, pagetable: &mut PageTable) {
-        assert!(self.status() == SegmentStatus::Initialized);
+        if self.status() != SegmentStatus::Initialized {
+            return;
+        }
         for vpn in self.range {
             let ppn = PhysPageNum(vpn.0);
             pagetable.map(vpn, ppn, self.flag.into())
@@ -152,7 +156,7 @@ impl Segment for IdenticalMappingSegment {
         self.status = SegmentStatus::Mapped;
     }
 
-    fn do_unmap(&mut self, pagetable: &mut PageTable) {
+    fn do_unmap(&mut self, _pagetable: &mut PageTable) {
         panic!("Parch don't unmap identitical mapping segment");
     }
 
@@ -184,9 +188,12 @@ impl Segment for ManagedSegment {
     }
 
     fn do_map(&mut self, pagetable: &mut PageTable) {
-        assert!(self.status() == SegmentStatus::Initialized);
+        
+        if self.status() != SegmentStatus::Initialized {
+            return;
+        }
         for vpn in self.range {
-            let pageguard = alloc_page(true);
+            let pageguard = alloc_vm_page();
             let ppn = pageguard.ppn;
             pagetable.map(vpn, ppn, self.flag.into());
             self.frames.insert(vpn, pageguard);
@@ -194,7 +201,7 @@ impl Segment for ManagedSegment {
         self.status = SegmentStatus::Mapped;
     }
 
-    fn do_unmap(&mut self, pagetable: &mut PageTable) {
+    fn do_unmap(&mut self, _pagetable: &mut PageTable) {
         assert!(self.status() == SegmentStatus::Mapped);
         for vpn in self.range {
             self.frames.remove(&vpn).unwrap();
@@ -230,12 +237,19 @@ impl Segment for VMASegment {
     }
 
     fn do_map(&mut self, pagetable: &mut PageTable) {
-        assert!(self.status() == SegmentStatus::Initialized);
+        if self.status() != SegmentStatus::Initialized {
+            return;
+        }
+        
+        for (vpn, pageguard) in &self.frames {
+            let ppn = pageguard.ppn;
+            pagetable.map(*vpn, ppn, self.flag.into());
+        }
+
         self.status = SegmentStatus::Mapped;
-        todo!();
     }
 
-    fn do_unmap(&mut self, pagetable: &mut PageTable) {
+    fn do_unmap(&mut self, _pagetable: &mut PageTable) {
         assert!(self.status() == SegmentStatus::Mapped);
         self.status = SegmentStatus::Zombie;
         todo!()
@@ -271,7 +285,10 @@ impl Segment for TrampolineSegment {
         extern "C" {
             fn strampoline();
         }
-        assert!(self.status() == SegmentStatus::Initialized);
+        
+        if self.status() != SegmentStatus::Initialized {
+            return;
+        }
         pagetable.map(
             U_TRAMPOLINE_ADDR.into(),
             PhysAddr::from(strampoline as usize).into(), 
@@ -280,7 +297,7 @@ impl Segment for TrampolineSegment {
         self.status = SegmentStatus::Mapped;
     }
 
-    fn do_unmap(&mut self, pagetable: &mut PageTable) {
+    fn do_unmap(&mut self, _pagetable: &mut PageTable) {
         panic!("Don't unmap trampoline!")
     }
 
@@ -314,7 +331,10 @@ impl Segment for UTrampolineSegment {
         extern "C" {
             fn sutrampoline();
         }
-        assert!(self.status() == SegmentStatus::Initialized);
+        
+        if self.status() != SegmentStatus::Initialized {
+            return;
+        }
         pagetable.map(
             TRAMPOLINE_ADDR.into(),
             PhysAddr::from(sutrampoline as usize).into(), 
@@ -323,7 +343,7 @@ impl Segment for UTrampolineSegment {
         self.status = SegmentStatus::Mapped;
     }
 
-    fn do_unmap(&mut self, pagetable: &mut PageTable) {
+    fn do_unmap(&mut self, _pagetable: &mut PageTable) {
         panic!("Don't unmap u_trampoline!")
     }
 
@@ -355,8 +375,11 @@ impl Segment for TrapContextSegment {
     }
 
     fn do_map(&mut self, pagetable: &mut PageTable) {
-        assert!(self.status() == SegmentStatus::Initialized);
-        let pageguard = alloc_page(true);
+        
+        if self.status() != SegmentStatus::Initialized {
+            return;
+        }
+        let pageguard = alloc_vm_page();
         let ppn = pageguard.ppn;
         pagetable.map(
             TRAP_CONTEXT_ADDR.into(),
@@ -367,7 +390,7 @@ impl Segment for TrapContextSegment {
         self.page = Some(pageguard);
     }
 
-    fn do_unmap(&mut self, pagetable: &mut PageTable) {
+    fn do_unmap(&mut self, _pagetable: &mut PageTable) {
         panic!("Don't unmap trap_context!")
     }
 
@@ -402,8 +425,35 @@ impl ManagedSegment {
 }
 
 impl VMASegment {
-    pub fn new() -> Box<Self> {
-        todo!()
+    pub fn new_at(start_vpn: VirtPageNum, len: usize, mut offset: usize, file: Arc<dyn RegularFile>, flag: SegmentFlags) -> Result<Box<Self>, ErrorNum> {
+        let stat = file.stat();
+        if !stat.open_mode.contains(OpenMode::SYS) {
+            if !stat.open_mode.contains(OpenMode::WRITE) && flag.contains(SegmentFlags::W) {
+                return Err(ErrorNum::EPERM);
+            }
+        }
+        if stat.file_size == 0 {
+            return Err(ErrorNum::EEMPTY)
+        }
+        if offset+len > stat.file_size {
+            return Err(ErrorNum::E2BIG);
+        }
+
+        let mut res = Self {
+            frames: BTreeMap::new(),
+            file: file.clone(),
+            flag,
+            status: SegmentStatus::Initialized,
+        };
+        let stat = file.stat();
+        let mut vpn = start_vpn;
+        while offset + len < stat.file_size {
+            let pg = file.get_page(offset)?;
+            res.frames.insert(vpn, pg);
+            offset += PAGE_SIZE;
+            vpn += 1;
+        }
+        Ok(Box::new(res))
     }
 }
 

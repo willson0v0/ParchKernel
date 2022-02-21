@@ -1,4 +1,4 @@
-use crate::mem::{PhysAddr, VirtAddr, PARange};
+use crate::mem::{PhysAddr, VirtAddr};
 
 pub const KERNEL_HEAP_SIZE  : usize = 0x10_0000;
 pub const PAGE_OFFSET		: usize = 12;

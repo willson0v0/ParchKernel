@@ -1,4 +1,4 @@
-use crate::{utils::{Mutex, SpinMutex}, config::PAGE_SIZE};
+use crate::{utils::{Mutex, SpinMutex}};
 use alloc::sync::Arc;
 use lazy_static::*;
 use super::{PhysAddr, phys_bitmap::BitMap, types::PhysPageNum};
@@ -37,18 +37,21 @@ pub type PageGuard = Arc<PageGuardInner>;
 
 pub struct PageGuardInner {
 	pub ppn: PhysPageNum,
-	pub is_exec: bool
+	pub is_exec: bool,
+	pub do_free: bool
 }
 
 impl PageGuardInner {
-	pub fn new(ppn: PhysPageNum, is_exec: bool) -> Self {
-		Self {ppn, is_exec}
+	pub fn new(ppn: PhysPageNum, is_exec: bool, do_free: bool) -> Self {
+		Self {ppn, is_exec, do_free}
 	}
 }
 
 impl Drop for PageGuardInner {
 	fn drop(&mut self) {
-		PAGE_ALLOCATOR.acquire().free(self.ppn, self.is_exec);
+		if self.do_free {
+			PAGE_ALLOCATOR.acquire().free(self.ppn, self.is_exec);
+		}
 	}
 }
 
@@ -62,7 +65,6 @@ pub struct BitMapPageAllocator {
 impl BitMapPageAllocator {
 	fn mark_unavailable(&mut self, ppn: PhysPageNum, is_exec: bool) {
 		let index = ppn - PhysPageNum::from(PhysAddr::from(BASE_ADDRESS as usize));
-		assert!(!self.bitmap_fs.get(index), "Already allocated");
 		if is_exec {
 			self.bitmap_mm.set(index);
 		}
@@ -134,20 +136,28 @@ impl PageAllocator for BitMapPageAllocator {
     }
 }
 
-#[deprecated]
-pub fn alloc_page(is_exec: bool) -> PageGuard {
-	PageGuard::new(PageGuardInner::new(PAGE_ALLOCATOR.acquire().alloc(is_exec).unwrap(), is_exec))
-}
-
 pub fn alloc_vm_page() -> PageGuard {
-	PageGuard::new(PageGuardInner::new(PAGE_ALLOCATOR.acquire().alloc(true).unwrap(), true))
+	let ppn = PAGE_ALLOCATOR.acquire().alloc(true).unwrap();
+	if cfg!(debug_assertions) {
+		unsafe{ppn.clear_content();}
+	}
+	PageGuard::new(PageGuardInner::new(ppn, true, true))
 }
 
 pub fn alloc_fs_page() -> PageGuard {
-	PageGuard::new(PageGuardInner::new(PAGE_ALLOCATOR.acquire().alloc(false).unwrap(), false))
+	let ppn = PAGE_ALLOCATOR.acquire().alloc(false).unwrap();
+	if cfg!(debug_assertions) {
+		unsafe{ppn.clear_content();}
+	}
+	PageGuard::new(PageGuardInner::new(ppn, false, true))
 }
 
-pub fn claim_page(to_claim: PhysPageNum, is_exec: bool) -> PageGuard {
-	PAGE_ALLOCATOR.acquire().claim(to_claim, is_exec);
-	PageGuard::new(PageGuardInner::new(to_claim, is_exec))
+pub fn claim_vm_page(to_claim: PhysPageNum) -> PageGuard {
+	PAGE_ALLOCATOR.acquire().claim(to_claim, true);
+	PageGuard::new(PageGuardInner::new(to_claim, true, false))
+}
+
+pub fn claim_fs_page(to_claim: PhysPageNum) -> PageGuard {
+	PAGE_ALLOCATOR.acquire().claim(to_claim, false);
+	PageGuard::new(PageGuardInner::new(to_claim, false, false))
 }

@@ -1,10 +1,10 @@
-use core::arch::asm;
+use core::{arch::asm};
 
 use alloc::{vec::Vec, sync::Arc, boxed::Box};
-use riscv::register::{satp, satp::Mode};
-use crate::{utils::{SpinMutex, Mutex, LogLevel}, config::{TRAMPOLINE_ADDR, PHYS_END_ADDR, MMIO_RANGES}, mem::{PhysAddr, TrampolineSegment, UTrampolineSegment, TrapContextSegment, IdenticalMappingSegment, segment::SegmentFlags, VirtAddr, types::VPNRange}};
+use riscv::register::{satp};
+use crate::{utils::{SpinMutex, Mutex, ErrorNum}, config::{PHYS_END_ADDR, MMIO_RANGES, TRAP_CONTEXT_ADDR, PAGE_SIZE}, mem::{TrampolineSegment, UTrampolineSegment, TrapContextSegment, IdenticalMappingSegment, segment::SegmentFlags, VirtAddr, types::VPNRange}};
 use lazy_static::*;
-use super::{PageTable, Segment, PTEFlags};
+use super::{PageTable, Segment, VirtPageNum};
 
 
 lazy_static! {
@@ -14,8 +14,8 @@ lazy_static! {
 
 
 pub struct MemLayout {
-    pagetable: PageTable,
-    segments: Vec<Arc<SpinMutex<Box<dyn Segment + Send>>>>
+    pub pagetable: PageTable,
+    pub segments: Vec<Arc<SpinMutex<Box<dyn Segment + Send>>>>
 }
 
 impl MemLayout {
@@ -146,5 +146,31 @@ impl MemLayout {
         } else {
             info!("Kernel virtual memory layout has been activated.");
         }
+    }
+
+    fn occupied(&self, vpn: VirtPageNum) -> bool {
+        self.pagetable.walk_find(vpn).is_some()
+    }
+
+    // length in byte
+    pub fn get_space(&self, length: usize) -> Result<VirtPageNum, ErrorNum> {
+        let vpn_top = VirtPageNum::from(TRAP_CONTEXT_ADDR - PAGE_SIZE);
+        let vpn_bottom = VirtPageNum::from(VirtAddr::from(PHYS_END_ADDR.0));
+        let page_count = (length / PAGE_SIZE) + 2; // guard page
+        for vpn_s in VPNRange::new(vpn_top - page_count, vpn_bottom) {
+            let mut good = true;
+            for vpn in VPNRange::new(vpn_s, vpn_s + page_count) {
+                if self.occupied(vpn) {
+                    good = false;
+                    break;
+                }
+            }
+            if good {
+                return Ok(vpn_s + 1);
+            } else {
+                continue;
+            }
+        }
+        Err(ErrorNum::ENOMEM)
     }
 }

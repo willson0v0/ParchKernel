@@ -3,7 +3,6 @@
 #![feature(alloc_error_handler)]
 #![feature(exclusive_range_pattern)]
 #![feature(panic_info_message)]
-#![feature(format_args_capture)]
 #![feature(step_trait)]
 #![allow(dead_code)]
 
@@ -14,13 +13,14 @@ mod config;
 mod interrupt;
 mod version;
 mod fs;
+mod process;
 
 #[macro_use]
 extern crate alloc;
 extern crate lazy_static;
 extern crate static_assertions;
 
-use core::{panic, arch::{global_asm, asm}};
+use core::{arch::{global_asm, asm}};
 
 global_asm!(include_str!("crt_setup.asm"));
 global_asm!(include_str!("interrupt/kernel_trap.asm"));
