@@ -6,6 +6,14 @@
 #![feature(step_trait)]
 #![allow(dead_code)]
 
+// lock sequence
+// 
+// CPU
+// PCBInner
+// FileInner
+// ParchFSInner
+// INode
+
 #[macro_use]
 mod utils;
 mod mem;
@@ -116,6 +124,8 @@ extern "C" fn genesis_s() {
         mem::init();
         println!("\r\n\n\n\nParch OS\n");
         println!("Ver\t: {}", version::VERSION);
+
+        fs::open(&fs::Path::new("/hello_world").unwrap(), fs::OpenMode::SYS);
     } else {
         // hart specific init code
     }

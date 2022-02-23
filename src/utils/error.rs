@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 #[repr(u64)]
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum ErrorNum {
     /// Operation not permitted
     EPERM           = 1     ,   
@@ -266,4 +266,12 @@ pub enum ErrorNum {
     EWRONGSEG       = 1000,
     /// MMap empty file
     EEMPTY          = 1001,
+    /// Out of range
+    EOOR            = 1002,
+    /// Not aligned
+    ENOTALIGNED     = 1003,
+    /// Bad file type
+    EBADTYPE        = 1004,
+    /// ParchFS file not mapped
+    ENOTMAPPED      = 1005,
 }

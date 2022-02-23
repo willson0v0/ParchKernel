@@ -3,11 +3,20 @@ use alloc::sync::Arc;
 use crate::utils::{SpinMutex, ErrorNum};
 use super::{Path, VirtualFileSystem, File, vfs::OpenMode, DirFile, RegularFile, LinkFile};
 
-struct MountManager{
-    inner: SpinMutex<MountManagerInner>
+pub struct MountManager{
+    // TODO: Change this to R/W lock
+    pub inner: SpinMutex<MountManagerInner>
 }
 
-struct MountManagerInner {
+impl MountManager {
+    pub fn new(root_fs: Arc<dyn VirtualFileSystem>) -> Self {
+        Self {
+            inner: SpinMutex::new("MountManager", MountManagerInner::new(root_fs))
+        }
+    }
+}
+
+pub struct MountManagerInner {
     fs: BTreeMap<Path, Arc<dyn VirtualFileSystem>>
 }
 

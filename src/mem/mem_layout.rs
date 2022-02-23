@@ -1,8 +1,8 @@
 use core::{arch::asm};
 
-use alloc::{vec::Vec, sync::Arc, boxed::Box};
+use alloc::{vec::Vec, sync::Arc};
 use riscv::register::{satp};
-use crate::{utils::{SpinMutex, Mutex, ErrorNum}, config::{PHYS_END_ADDR, MMIO_RANGES, TRAP_CONTEXT_ADDR, PAGE_SIZE}, mem::{TrampolineSegment, UTrampolineSegment, TrapContextSegment, IdenticalMappingSegment, segment::SegmentFlags, VirtAddr, types::VPNRange}};
+use crate::{utils::{SpinMutex, ErrorNum}, config::{PHYS_END_ADDR, MMIO_RANGES, TRAP_CONTEXT_ADDR, PAGE_SIZE}, mem::{TrampolineSegment, UTrampolineSegment, TrapContextSegment, IdenticalMappingSegment, segment::SegmentFlags, VirtAddr, types::VPNRange}};
 use lazy_static::*;
 use super::{PageTable, Segment, VirtPageNum};
 
@@ -15,7 +15,7 @@ lazy_static! {
 
 pub struct MemLayout {
     pub pagetable: PageTable,
-    pub segments: Vec<Arc<SpinMutex<Box<dyn Segment + Send>>>>
+    pub segments: Vec<Arc<dyn Segment>>
 }
 
 impl MemLayout {
@@ -121,16 +121,15 @@ impl MemLayout {
         layout
     }
 
-    pub fn add_segment(&mut self, seg: Box<dyn Segment + Send>) {
-        self.segments.push(Arc::new(SpinMutex::new("memlayout segment", seg)));
+    pub fn add_segment(&mut self, seg: Arc<dyn Segment + Send>) {
+        self.segments.push(seg);
     }
 
     pub fn do_map(&mut self) {
         for seg in self.segments.iter() {
-            let mut seg_locked = seg.acquire();
-            verbose!("Now mapping {:?} ...", seg_locked.as_ref());
-            seg_locked.do_map(&mut self.pagetable);
-            debug!("Done mapping {:?}.", seg_locked.as_ref());
+            verbose!("Now mapping {:?} ...", seg);
+            seg.do_map(&mut self.pagetable);
+            debug!("Done mapping {:?}.", seg);
         }
     }
 
@@ -172,5 +171,14 @@ impl MemLayout {
             }
         }
         Err(ErrorNum::ENOMEM)
+    }
+
+    pub fn get_segment(&self, start_vpn: VirtPageNum) -> Option<Arc<dyn Segment>> {
+        for seg in self.segments.iter() {
+            if seg.start_vpn() == start_vpn {
+                return Some(seg.clone());
+            }
+        }
+        return None;
     }
 }

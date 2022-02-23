@@ -1,4 +1,5 @@
 use core::fmt::{Debug, Formatter};
+use alloc::string::ToString;
 use alloc::{sync::Arc, string::String, vec::Vec};
 use alloc::collections::VecDeque;
 use bitflags::*;
@@ -37,7 +38,7 @@ impl Into<SegmentFlags> for OpenMode {
     }
 }
 
-pub trait VirtualFileSystem : Send + Sync {
+pub trait VirtualFileSystem : Send + Sync + Debug {
     fn open(&self, path: &Path, mode: OpenMode) -> Result<Arc<dyn File>, ErrorNum>;
     fn mkdir(&self, path: &Path) -> Result<Arc<dyn DirFile>, ErrorNum>;
     fn mkfile(&self, path: &Path) -> Result<Arc<dyn RegularFile>, ErrorNum>;
@@ -48,7 +49,7 @@ pub trait VirtualFileSystem : Send + Sync {
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Path {
-    components  : Vec<String>
+    pub components  : Vec<String>
 }
 
 impl Debug for Path {
@@ -61,7 +62,7 @@ impl Debug for Path {
 }
 
 impl Path {
-    pub fn new(path: String) -> Result<Self, ErrorNum> {
+    pub fn new_s(path: String) -> Result<Self, ErrorNum> {
         let mut list: VecDeque<String> = path.split('/').map(|s| String::from(s)).collect();
         if path.starts_with('/') {
             list.pop_front();
@@ -80,6 +81,10 @@ impl Path {
                 components: list.into()
             }
         )
+    }
+
+    pub fn new(path: &str) -> Result<Self, ErrorNum> {
+        Self::new_s(path.to_string())
     }
 
     pub fn is_root(&self) -> bool {
@@ -113,10 +118,31 @@ impl Path {
             components: Vec::from(&self.components[prefix.len()..])
         }
     }
+
+    pub fn append(&self, comp: String) -> Result<Path, ErrorNum> {
+        if comp.contains('/') {return Err(ErrorNum::ENOENT);}
+        let mut components = self.components.clone();
+        components.push(comp);
+        Ok(Self {
+            components
+        })
+    }
+
+    pub fn strip_head(&self) -> Self {
+        Self {
+            components: self.components[1..].to_vec()
+        }
+    }
+
+    pub fn strip_tail(&self) -> Self {
+        Self {
+            components: self.components[..self.components.len() - 1].to_vec()
+        }
+    }
 }
 
 impl From<&str> for Path {
     fn from(s: &str) -> Self {
-        Self::new(String::from(s)).unwrap()
+        Self::new(s).unwrap()
     }
 }

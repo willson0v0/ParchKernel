@@ -36,6 +36,7 @@ impl<T> Drop for MutexGuard<'_, T> {
     }
 }
 
+// TODO: Implement R/W lock
 pub struct SpinMutex<T> {
     is_acquired  : AtomicBool,
     name        : String,

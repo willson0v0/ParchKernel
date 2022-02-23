@@ -1,8 +1,8 @@
 use core::fmt::{self, Debug, Formatter};
 
-use alloc::{sync::{Arc}, collections::BTreeMap, boxed::Box};
+use alloc::{sync::{Arc}, collections::BTreeMap};
 use bitflags::*;
-use crate::config::PAGE_SIZE;
+use crate::{config::PAGE_SIZE, utils::{SpinMutex, Mutex}};
 use crate::{fs::{RegularFile, File}, utils::ErrorNum, config::{TRAMPOLINE_ADDR, U_TRAMPOLINE_ADDR, TRAP_CONTEXT_ADDR}};
 use crate::fs::OpenMode;
 use super::{types::{VPNRange, VirtPageNum, PhysPageNum}, PageGuard, pagetable::{PageTable, PTEFlags}, alloc_vm_page, PhysAddr};
@@ -46,84 +46,99 @@ pub enum SegmentType {
 }
 
 
-pub trait Segment: Debug {
+pub trait Segment: Debug + Send + Sync {
     fn as_segment   <'a>(self: Arc<Self>) -> Arc<dyn Segment + 'a> where Self: 'a;
     fn as_identical <'a>(self: Arc<Self>) -> Result<Arc<IdenticalMappingSegment >, ErrorNum> where Self: 'a;
     fn as_managed   <'a>(self: Arc<Self>) -> Result<Arc<ManagedSegment          >, ErrorNum> where Self: 'a;
     fn as_vma       <'a>(self: Arc<Self>) -> Result<Arc<VMASegment              >, ErrorNum> where Self: 'a;
-    fn do_map(&mut self, pagetable: &mut PageTable);
-    fn do_unmap(&mut self, pagetable: &mut PageTable);
+    fn do_map(&self, pagetable: &mut PageTable);
+    fn do_unmap(&self, pagetable: &mut PageTable);
     fn status(&self) -> SegmentStatus;
     fn seg_type(&self) -> SegmentType;
+    fn start_vpn(&self) -> VirtPageNum;
 }
 
-pub struct IdenticalMappingSegment {
+pub struct IdenticalMappingSegment (SpinMutex<IdenticalMappingSegmentInner>);
+
+struct IdenticalMappingSegmentInner {
     range: VPNRange,
     flag: SegmentFlags,
     status: SegmentStatus
 }
 
-pub struct ManagedSegment {
+pub struct ManagedSegment (SpinMutex<ManagedSegmentInner>);
+pub struct ManagedSegmentInner {
     range: VPNRange,
     frames: BTreeMap<VirtPageNum, PageGuard>,
     flag: SegmentFlags,
     status: SegmentStatus
 }
 
-pub struct VMASegment {
+pub struct VMASegment (SpinMutex<VMASegmentInner>);
+pub struct VMASegmentInner {
     frames: BTreeMap<VirtPageNum, PageGuard>,
     file: Arc<dyn RegularFile>,
     flag: SegmentFlags,
+    status: SegmentStatus,
+    start_vpn: VirtPageNum,
+}
+
+pub struct TrampolineSegment (SpinMutex<TrampolineSegmentInner>);
+pub struct TrampolineSegmentInner {
     status: SegmentStatus
 }
 
-pub struct TrampolineSegment {
+pub struct UTrampolineSegment (SpinMutex<UTrampolineSegmentInner>);
+pub struct UTrampolineSegmentInner {
     status: SegmentStatus
 }
 
-pub struct UTrampolineSegment {
-    status: SegmentStatus
-}
-
-pub struct TrapContextSegment {
+pub struct TrapContextSegment (SpinMutex<TrapContextSegmentInner>);
+pub struct TrapContextSegmentInner {
     status: SegmentStatus,
     page: Option<PageGuard>
 }
 
 impl Debug for IdenticalMappingSegment {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_fmt(format_args!("{:?} Identical segment {:?} ~ {:?} with flag {:?}", self.status, self.range.start(), self.range.end(), self.flag))
+        let inner = self.0.acquire();
+        f.write_fmt(format_args!("{:?} Identical segment {:?} ~ {:?} with flag {:?}", inner.status, inner.range.start(), inner.range.end(), inner.flag))
     }
 }
 
 impl Debug for ManagedSegment {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_fmt(format_args!("{:?} Managed segment {:?} ~ {:?} with flag {:?}", self.status, self.range.start(), self.range.end(), self.flag))
+        let inner = self.0.acquire();
+        f.write_fmt(format_args!("{:?} Managed segment {:?} ~ {:?} with flag {:?}", inner.status, inner.range.start(), inner.range.end(), inner.flag))
     }
 }
 
 impl Debug for VMASegment {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         // TODO: Add file desc
-        f.write_fmt(format_args!("{:?} VMA segment with flag {:?}", self.status, self.flag))
+        let inner = self.0.acquire();
+        f.write_fmt(format_args!("{:?} VMA segment with flag {:?}", inner.status, inner.flag))
     }
 }
 
 impl Debug for TrampolineSegment {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_fmt(format_args!("{:?} Trampoline segment", self.status))
+        let inner = self.0.acquire();
+        f.write_fmt(format_args!("{:?} Trampoline segment", inner.status))
     }
 }
 
 impl Debug for UTrampolineSegment {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_fmt(format_args!("{:?} UTrampoline segment", self.status))
+        let inner = self.0.acquire();
+        f.write_fmt(format_args!("{:?} UTrampoline segment", inner.status))
     }
 }
 
 impl Debug for TrapContextSegment {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_fmt(format_args!("{:?} TrapContext segment", self.status))
+        let inner = self.0.acquire();
+        f.write_fmt(format_args!("{:?} TrapContext segment", inner.status))
     }
 }
 
@@ -145,27 +160,32 @@ impl Segment for IdenticalMappingSegment {
         Err(ErrorNum::EWRONGSEG)
     }
 
-    fn do_map(&mut self, pagetable: &mut PageTable) {
-        if self.status() != SegmentStatus::Initialized {
+    fn do_map(&self, pagetable: &mut PageTable) {
+        let mut inner = self.0.acquire();
+        if inner.status != SegmentStatus::Initialized {
             return;
         }
-        for vpn in self.range {
+        for vpn in inner.range {
             let ppn = PhysPageNum(vpn.0);
-            pagetable.map(vpn, ppn, self.flag.into())
+            pagetable.map(vpn, ppn, inner.flag.into())
         }
-        self.status = SegmentStatus::Mapped;
+        inner.status = SegmentStatus::Mapped;
     }
 
-    fn do_unmap(&mut self, _pagetable: &mut PageTable) {
+    fn do_unmap(&self, _pagetable: &mut PageTable) {
         panic!("Parch don't unmap identitical mapping segment");
     }
 
     fn status(&self) -> SegmentStatus {
-        self.status
+        self.0.acquire().status
     }
 
     fn seg_type(&self) -> SegmentType {
         SegmentType::Identical
+    }
+
+    fn start_vpn(&self) -> VirtPageNum {
+        self.0.acquire().range.start()
     }
 }
 
@@ -187,34 +207,39 @@ impl Segment for ManagedSegment {
         Err(ErrorNum::EWRONGSEG)
     }
 
-    fn do_map(&mut self, pagetable: &mut PageTable) {
-        
-        if self.status() != SegmentStatus::Initialized {
+    fn do_map(&self, pagetable: &mut PageTable) {
+        let mut inner = self.0.acquire();
+        if inner.status != SegmentStatus::Initialized {
             return;
         }
-        for vpn in self.range {
+        for vpn in inner.range {
             let pageguard = alloc_vm_page();
             let ppn = pageguard.ppn;
-            pagetable.map(vpn, ppn, self.flag.into());
-            self.frames.insert(vpn, pageguard);
+            pagetable.map(vpn, ppn, inner.flag.into());
+            inner.frames.insert(vpn, pageguard);
         }
-        self.status = SegmentStatus::Mapped;
+        inner.status = SegmentStatus::Mapped;
     }
 
-    fn do_unmap(&mut self, _pagetable: &mut PageTable) {
-        assert!(self.status() == SegmentStatus::Mapped);
-        for vpn in self.range {
-            self.frames.remove(&vpn).unwrap();
+    fn do_unmap(&self, _pagetable: &mut PageTable) {
+        let mut inner = self.0.acquire();
+        assert!(inner.status == SegmentStatus::Mapped);
+        for vpn in inner.range {
+            inner.frames.remove(&vpn).unwrap();
         }
-        self.status = SegmentStatus::Zombie;
+        inner.status = SegmentStatus::Zombie;
     }
 
     fn status(&self) -> SegmentStatus {
-        self.status
+        self.0.acquire().status
     }
 
     fn seg_type(&self) -> SegmentType {
         SegmentType::Managed
+    }
+
+    fn start_vpn(&self) -> VirtPageNum {
+        self.0.acquire().range.start()
     }
 }
 
@@ -236,31 +261,40 @@ impl Segment for VMASegment {
         Ok(self)
     }
 
-    fn do_map(&mut self, pagetable: &mut PageTable) {
-        if self.status() != SegmentStatus::Initialized {
+    fn do_map(&self, pagetable: &mut PageTable) {
+        let mut inner = self.0.acquire();
+        if inner.status != SegmentStatus::Initialized {
             return;
         }
         
-        for (vpn, pageguard) in &self.frames {
+        for (vpn, pageguard) in &inner.frames {
             let ppn = pageguard.ppn;
-            pagetable.map(*vpn, ppn, self.flag.into());
+            pagetable.map(*vpn, ppn, inner.flag.into());
         }
 
-        self.status = SegmentStatus::Mapped;
+        inner.status = SegmentStatus::Mapped;
     }
 
-    fn do_unmap(&mut self, _pagetable: &mut PageTable) {
-        assert!(self.status() == SegmentStatus::Mapped);
-        self.status = SegmentStatus::Zombie;
-        todo!()
+    fn do_unmap(&self, pagetable: &mut PageTable) {
+        let mut inner = self.0.acquire();
+        assert!(inner.status == SegmentStatus::Mapped);
+        for (vpn, _pg) in &inner.frames {
+            pagetable.unmap(*vpn);
+        }
+        inner.frames.clear();
+        inner.status = SegmentStatus::Zombie;
     }
 
     fn status(&self) -> SegmentStatus {
-        self.status
+        self.0.acquire().status
     }
 
     fn seg_type(&self) -> SegmentType {
         SegmentType::VMA
+    }
+
+    fn start_vpn(&self) -> VirtPageNum {
+        self.0.acquire().start_vpn
     }
 }
 
@@ -281,32 +315,37 @@ impl Segment for TrampolineSegment {
         Err(ErrorNum::EWRONGSEG)
     }
 
-    fn do_map(&mut self, pagetable: &mut PageTable) {
+    fn do_map(&self, pagetable: &mut PageTable) {
+        let mut inner = self.0.acquire();
         extern "C" {
             fn strampoline();
         }
         
-        if self.status() != SegmentStatus::Initialized {
+        if inner.status != SegmentStatus::Initialized {
             return;
         }
         pagetable.map(
-            U_TRAMPOLINE_ADDR.into(),
+            TRAMPOLINE_ADDR.into(),
             PhysAddr::from(strampoline as usize).into(), 
             PTEFlags::R | PTEFlags::X
         );
-        self.status = SegmentStatus::Mapped;
+        inner.status = SegmentStatus::Mapped;
     }
 
-    fn do_unmap(&mut self, _pagetable: &mut PageTable) {
+    fn do_unmap(&self, _pagetable: &mut PageTable) {
         panic!("Don't unmap trampoline!")
     }
 
     fn status(&self) -> SegmentStatus {
-        self.status
+        self.0.acquire().status
     }
 
     fn seg_type(&self) -> SegmentType {
         SegmentType::Trampoline
+    }
+
+    fn start_vpn(&self) -> VirtPageNum {
+        U_TRAMPOLINE_ADDR.into()
     }
 }
 
@@ -327,32 +366,37 @@ impl Segment for UTrampolineSegment {
         Err(ErrorNum::EWRONGSEG)
     }
 
-    fn do_map(&mut self, pagetable: &mut PageTable) {
+    fn do_map(&self, pagetable: &mut PageTable) {
+        let mut inner = self.0.acquire();
         extern "C" {
             fn sutrampoline();
         }
         
-        if self.status() != SegmentStatus::Initialized {
+        if inner.status != SegmentStatus::Initialized {
             return;
         }
         pagetable.map(
-            TRAMPOLINE_ADDR.into(),
+            U_TRAMPOLINE_ADDR.into(),
             PhysAddr::from(sutrampoline as usize).into(), 
             PTEFlags::R | PTEFlags::X | PTEFlags::U
         );
-        self.status = SegmentStatus::Mapped;
+        inner.status = SegmentStatus::Mapped;
     }
 
-    fn do_unmap(&mut self, _pagetable: &mut PageTable) {
+    fn do_unmap(&self, _pagetable: &mut PageTable) {
         panic!("Don't unmap u_trampoline!")
     }
 
     fn status(&self) -> SegmentStatus {
-        self.status
+        self.0.acquire().status
     }
 
     fn seg_type(&self) -> SegmentType {
         SegmentType::UTrampoline
+    }
+
+    fn start_vpn(&self) -> VirtPageNum {
+        U_TRAMPOLINE_ADDR.into()
     }
 }
 
@@ -374,9 +418,9 @@ impl Segment for TrapContextSegment {
         Err(ErrorNum::EWRONGSEG)
     }
 
-    fn do_map(&mut self, pagetable: &mut PageTable) {
-        
-        if self.status() != SegmentStatus::Initialized {
+    fn do_map(&self, pagetable: &mut PageTable) {
+        let mut inner = self.0.acquire();
+        if inner.status != SegmentStatus::Initialized {
             return;
         }
         let pageguard = alloc_vm_page();
@@ -386,47 +430,51 @@ impl Segment for TrapContextSegment {
             ppn, 
             PTEFlags::R | PTEFlags::W
         );
-        self.status = SegmentStatus::Mapped;
-        self.page = Some(pageguard);
+        inner.status = SegmentStatus::Mapped;
+        inner.page = Some(pageguard);
     }
 
-    fn do_unmap(&mut self, _pagetable: &mut PageTable) {
+    fn do_unmap(&self, _pagetable: &mut PageTable) {
         panic!("Don't unmap trap_context!")
     }
 
     fn status(&self) -> SegmentStatus {
-        self.status
+        self.0.acquire().status
     }
 
     fn seg_type(&self) -> SegmentType {
         SegmentType::TrapContext
     }
+
+    fn start_vpn(&self) -> VirtPageNum {
+        TRAP_CONTEXT_ADDR.into()
+    }
 }
 
 impl IdenticalMappingSegment {
-    pub fn new(range: VPNRange, flag: SegmentFlags) -> Box<Self> {
-        Box::new(Self {
+    pub fn new(range: VPNRange, flag: SegmentFlags) -> Arc<Self> {
+        Arc::new(Self( SpinMutex::new("Segment lock", IdenticalMappingSegmentInner{
             range,
             flag,
             status: SegmentStatus::Initialized
-        })
+        })))
     }
 }
 
 impl ManagedSegment {
-    pub fn new(range: VPNRange, flag: SegmentFlags) -> Box<Self> {
-        Box::new(Self {
+    pub fn new(range: VPNRange, flag: SegmentFlags) -> Arc<Self> {
+        Arc::new(Self( SpinMutex::new("Segment lock", ManagedSegmentInner{
             range,
             frames: BTreeMap::new(),
             flag,
             status: SegmentStatus::Initialized
-        })
+        })))
     }
 }
 
 impl VMASegment {
-    pub fn new_at(start_vpn: VirtPageNum, len: usize, mut offset: usize, file: Arc<dyn RegularFile>, flag: SegmentFlags) -> Result<Box<Self>, ErrorNum> {
-        let stat = file.stat();
+    pub fn new_at(start_vpn: VirtPageNum, len: usize, mut offset: usize, file: Arc<dyn RegularFile>, flag: SegmentFlags) -> Result< Arc<Self>, ErrorNum> {
+        let stat = file.stat()?;
         if !stat.open_mode.contains(OpenMode::SYS) {
             if !stat.open_mode.contains(OpenMode::WRITE) && flag.contains(SegmentFlags::W) {
                 return Err(ErrorNum::EPERM);
@@ -436,16 +484,16 @@ impl VMASegment {
             return Err(ErrorNum::EEMPTY)
         }
         if offset+len > stat.file_size {
-            return Err(ErrorNum::E2BIG);
+            return Err(ErrorNum::EOOR);
         }
 
-        let mut res = Self {
+        let mut res = VMASegmentInner {
             frames: BTreeMap::new(),
             file: file.clone(),
             flag,
             status: SegmentStatus::Initialized,
+            start_vpn
         };
-        let stat = file.stat();
         let mut vpn = start_vpn;
         while offset + len < stat.file_size {
             let pg = file.get_page(offset)?;
@@ -453,24 +501,24 @@ impl VMASegment {
             offset += PAGE_SIZE;
             vpn += 1;
         }
-        Ok(Box::new(res))
+        Ok(Arc::new(VMASegment(SpinMutex::new("Segment lock", res))))
     }
 }
 
 impl TrampolineSegment {
-    pub fn new() -> Box<Self> {
-        Box::new(Self { status: SegmentStatus::Initialized })
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self( SpinMutex::new("Segment lock", TrampolineSegmentInner{ status: SegmentStatus::Initialized } )))
     }
 }
 
 impl UTrampolineSegment {
-    pub fn new() -> Box<Self> {
-        Box::new(Self { status: SegmentStatus::Initialized })
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self( SpinMutex::new("Segment lock", UTrampolineSegmentInner{ status: SegmentStatus::Initialized } )))
     }
 }
 
 impl TrapContextSegment {
-    pub fn new() -> Box<Self> {
-        Box::new(Self { status: SegmentStatus::Initialized, page: None })
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self(SpinMutex::new("Segment lock",  TrapContextSegmentInner{ status: SegmentStatus::Initialized, page: None} )))
     }
 }

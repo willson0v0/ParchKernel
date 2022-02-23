@@ -1,8 +1,11 @@
 
 use core::fmt::{self, Debug, Formatter};
+use core::slice::from_raw_parts_mut;
 use core::{ops};
-use core::ptr::{read_volatile, write_volatile};
+use core::ptr::{read_volatile, write_volatile, copy_nonoverlapping};
 
+
+use alloc::vec::Vec;
 
 use crate::config::{PAGE_OFFSET, PAGE_SIZE};
 use crate::utils::range::{StepUp, StepDown, Range};
@@ -130,6 +133,14 @@ impl PhysAddr {
         (self.0 as *mut T).as_mut().unwrap()
     }
 
+    pub unsafe fn write_data(&self, data: Vec<u8>) {
+        copy_nonoverlapping(data.as_ptr(), self.0 as * mut u8, data.len());
+    }
+
+    pub unsafe fn read_data(&self, length: usize) -> Vec<u8> {
+        from_raw_parts_mut(self.0 as *mut u8, length).to_vec()
+    }
+
     pub fn to_ppn_ceil(&self) -> PhysPageNum {
         if self.0 == 0 {
             1.into()
@@ -150,6 +161,15 @@ impl VirtAddr {
 
     pub unsafe fn instantiate_volatile<T>(&self) -> &'static mut T {
         (self.0 as *mut T).as_mut().unwrap()
+    }
+
+    pub unsafe fn write_data(&self, data: Vec<u8>) {
+        copy_nonoverlapping(data.as_ptr(), self.0 as * mut u8, data.len());
+    }
+
+    /// This WILL copy the data (to_vec did it)
+    pub unsafe fn read_data(&self, length: usize) -> Vec<u8> {
+        from_raw_parts_mut(self.0 as *mut u8, length).to_vec()
     }
 
     pub fn to_vpn_ceil(&self) -> VirtPageNum {

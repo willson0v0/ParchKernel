@@ -29,6 +29,7 @@ pub use types::{
 pub use page_allocator::{
     alloc_vm_page,
     alloc_fs_page,
+    free_fs_page,
     claim_vm_page,
     claim_fs_page,
     PageGuard

@@ -144,12 +144,17 @@ pub fn alloc_vm_page() -> PageGuard {
 	PageGuard::new(PageGuardInner::new(ppn, true, true))
 }
 
-pub fn alloc_fs_page() -> PageGuard {
+/// fs pages persist across boots, so RAII won't work for them, must explicit free
+pub fn alloc_fs_page() -> PhysPageNum {
 	let ppn = PAGE_ALLOCATOR.acquire().alloc(false).unwrap();
 	if cfg!(debug_assertions) {
 		unsafe{ppn.clear_content();}
 	}
-	PageGuard::new(PageGuardInner::new(ppn, false, true))
+	ppn
+}
+
+pub fn free_fs_page(ppn: PhysPageNum) {
+	PAGE_ALLOCATOR.acquire().free(ppn, false)
 }
 
 pub fn claim_vm_page(to_claim: PhysPageNum) -> PageGuard {
