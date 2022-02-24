@@ -3,6 +3,8 @@
 
 use alloc::string::String;
 
+use crate::interrupt::{push_intr_off, pop_intr_off};
+
 use super::UART0;
 use core::fmt::{self, Write};
 
@@ -49,7 +51,9 @@ const BG_DEFAULT    :u8 = 49;
 
 // ======================== functions ========================
 pub fn k_puts(ch: &str) {
+    push_intr_off();
 	UART0.write_synced(ch);
+    pop_intr_off();
 }
 
 struct  OutputFormatter;

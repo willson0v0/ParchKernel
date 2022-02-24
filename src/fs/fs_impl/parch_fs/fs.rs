@@ -1,8 +1,8 @@
 use core::fmt::Debug;
 
-use alloc::{collections::{BTreeMap}, sync::Arc};
+use alloc::{collections::{BTreeMap}, sync::Arc, string::String};
 
-use crate::{fs::{VirtualFileSystem, fs_impl::{parch_fs::{INODE_SIZE, BLK_SIZE, PFS_MAGIC, INODE_BITMAP_SIZE, PFSDir, PFSBase}, PARCH_FS}, DirFile, OpenMode, Path}, utils::{SpinMutex, Mutex, ErrorNum}, mem::{BitMap, PhysAddr, alloc_fs_page, free_fs_page, PhysPageNum}, config::PAGE_SIZE};
+use crate::{fs::{VirtualFileSystem, fs_impl::{parch_fs::{INODE_SIZE, BLK_SIZE, PFS_MAGIC, INODE_BITMAP_SIZE, PFSDir, PFSBase}, PARCH_FS}, DirFile, OpenMode, Path, types::{Permission, FileType}, File}, utils::{SpinMutex, Mutex, ErrorNum}, mem::{BitMap, PhysAddr, alloc_fs_page, free_fs_page, PhysPageNum}, config::PAGE_SIZE};
 
 use super::{PFSINode, INodeNo, SuperBlock, BlockNo};
 
@@ -71,6 +71,34 @@ impl ParchFS {
         let mut inner = self.0.acquire();
         inner.free_blk(block_no);
     }
+    
+    pub fn make_file(&self, parent: Arc<dyn DirFile>, name: String, perm: Permission, f_type: FileType, open_mode: OpenMode) -> Result<Arc<dyn File>, ErrorNum> {
+        let mut inner = self.0.acquire();
+        inner.make_file(parent, name, perm, f_type, open_mode)
+    }
+
+    pub fn root_dir(&self, open_mode: OpenMode) -> Arc<dyn DirFile> {
+        self.open(&Path::from("/"), open_mode).unwrap().as_dir().unwrap()
+    }
+
+    pub fn create_path(&self, path: &Path) -> Result<Arc<dyn DirFile>, ErrorNum> {
+        if path.is_root() {return Ok(());}
+        let mut dir = self.root_dir(OpenMode::SYS);
+        let mut path = path.clone();
+        while path.len() >= 1 {
+            let cur_name = path.components[0];
+            let res = dir.make_file(cur_name.into(), Permission::default(), FileType::DIR);
+            if res.is_err_with(|x| x==ErrorNum::EEXIST) {
+                dir = dir.open_dir(cur_name.into(), OpenMode::SYS)?.as_dir()?;
+            } else if let Ok(open_res) = res {
+                dir = open_res.as_dir()?;
+            } else {
+                return Err(res.err().unwrap())
+            }
+            path = path.strip_head();
+        }
+        Ok(dir)
+    }
 }
 
 impl ParchFSInner {
@@ -137,10 +165,16 @@ impl ParchFSInner {
         assert!(self.inode_bitmap.get(inode_no), "Freeing free inode");
         self.inode_bitmap.clear(inode_no);
     }
+
+    pub fn make_file(&mut self, parent: Arc<dyn DirFile>, name: String, perm: Permission, f_type: FileType, open_mode: OpenMode) -> Result<Arc<dyn File>, ErrorNum> {
+        parent.make_file(name.clone(), perm, f_type)?;
+        parent.open_dir(&Path::from(name), open_mode)
+    }
 }
 
 impl VirtualFileSystem for ParchFS {
     fn open(&self, path: &crate::fs::Path, mode: crate::fs::vfs::OpenMode) -> Result<alloc::sync::Arc<dyn crate::fs::File>, crate::utils::ErrorNum> {
+        // Note: cannot use open "/" or root_dir() here
         let root_dir = Arc::new(
             PFSDir(SpinMutex::new("PFS ROOT", crate::fs::fs_impl::parch_fs::PFSDirInner { base: PFSBase {
                 inode_no: self.0.acquire().superblock.root_inode.into(),
@@ -153,16 +187,22 @@ impl VirtualFileSystem for ParchFS {
         root_dir.open_dir(path, mode)
     }
 
-    fn mkdir(&self, _path: &crate::fs::Path) -> Result<alloc::sync::Arc<dyn crate::fs::DirFile>, crate::utils::ErrorNum> {
-        todo!()
+    fn mkdir(&self, mut path: &crate::fs::Path) -> Result<(), crate::utils::ErrorNum> {
+        if path.is_root() {return Err(ErrorNum::EEXIST);}
+        self.create_path(path)?;
+        Ok(())
     }
 
-    fn mkfile(&self, _path: &crate::fs::Path) -> Result<alloc::sync::Arc<dyn crate::fs::RegularFile>, crate::utils::ErrorNum> {
-        todo!()
+    fn mkfile(&self, path: &crate::fs::Path) -> Result<(), crate::utils::ErrorNum> {
+        if path.is_root() {return Err(ErrorNum::EEXIST);}
+        let dir = self.create_path(&path.strip_tail())?;
+        dir.make_file(path.last(), Permission::default(), FileType::REGULAR)?;
+        Ok(())
     }
 
-    fn remove(&self, _path: &crate::fs::Path) -> Result<(), crate::utils::ErrorNum> {
-        todo!()
+    fn remove(&self, path: &crate::fs::Path) -> Result<(), crate::utils::ErrorNum> {
+        let dir = self.open(&path.strip_tail(), OpenMode::SYS)?.as_dir()?;
+        dir.remove_file(path.last())
     }
 
     fn link(&self, _dest: alloc::sync::Arc<dyn crate::fs::File>, _link_file: &crate::fs::Path) -> Result<alloc::sync::Arc<dyn crate::fs::File>, crate::utils::ErrorNum> {

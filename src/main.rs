@@ -37,6 +37,8 @@ global_asm!(include_str!("interrupt/trampoline.asm"));
 
 use riscv::register::{medeleg, mepc, mhartid, mideleg, mie, mscratch, mstatus, mtvec, pmpaddr0, pmpcfg0, satp, sie, sstatus, stvec};
 
+use alloc::string::String;
+
 static mut MSCRATCH_ARR: [[usize; 6]; config::MAX_CPUS] = [[0; 6]; config::MAX_CPUS];
 
 #[no_mangle]
@@ -125,7 +127,10 @@ extern "C" fn genesis_s() {
         println!("\r\n\n\n\nParch OS\n");
         println!("Ver\t: {}", version::VERSION);
 
-        fs::open(&fs::Path::new("/hello_world").unwrap(), fs::OpenMode::SYS);
+        let res = fs::open(&fs::Path::new("/hello_world").unwrap(), fs::OpenMode::SYS).unwrap();
+        let stat = res.stat().unwrap();
+        let content = res.read(stat.file_size, 0).unwrap();
+        print!("{}", String::from_utf8(content).unwrap());
     } else {
         // hart specific init code
     }

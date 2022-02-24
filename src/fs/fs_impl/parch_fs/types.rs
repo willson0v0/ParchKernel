@@ -7,7 +7,7 @@ use bitflags::*;
 
 
 
-use alloc::{sync::{Weak, Arc}, string::String};
+use alloc::{sync::{Weak, Arc}, string::String, vec::Vec};
 
 use static_assertions::*;
 
@@ -142,7 +142,7 @@ assert_eq_size!(PFSDEntry, [u8; DENTRY_SIZE]);
 
 impl PFSDEntry {
     pub fn name(&self) -> String {
-        let res = String::from_utf8(self.f_name.to_vec()).unwrap();
+        let res = String::from_utf8(self.f_name[0..(self.name_len as usize)].to_vec()).unwrap();
         res.chars().filter(|&x| x != '\0').collect()
     }
 
@@ -276,6 +276,53 @@ impl Drop for PFSDir {
     }
 }
 
+impl PFSDirInner {
+    fn read_dirent_raw(&self) -> Result<alloc::vec::Vec<PFSDEntry>, ErrorNum> {
+        let stat = self.base.stat()?;
+        if stat.file_size % size_of::<PFSDEntry>() != 0 {
+            panic!("Malformed FS")
+        }
+        let dirent_count = stat.file_size / size_of::<PFSDEntry>();
+        let buffer = self.base.read(stat.file_size, 0)?;
+        let buffer = buffer.as_ptr() as *mut PFSDEntry;
+        let mut buffer = unsafe{from_raw_parts(buffer, dirent_count).to_vec()};
+        Ok(buffer)
+    }
+
+    fn write_dirent_at(&self, dirent: PFSDEntry, pos: usize) -> Result<(), ErrorNum> {
+        let stat = self.base.stat()?;
+        if stat.file_size % size_of::<PFSDEntry>() != 0 {
+            panic!("Malformed FS")
+        }
+        if (pos + 1) * size_of::<PFSDEntry>() > stat.file_size {
+            panic!("Dirent out of bound")
+        }
+        // reset stat
+        let buffer: *const PFSDEntry = &dirent;
+        let buffer = buffer as *const u8;
+        let buffer = unsafe{from_raw_parts(buffer, size_of::<PFSDEntry>()).to_vec()};
+        self.base.write(buffer, pos * size_of::<PFSDEntry>())?;
+        Ok(())
+    }
+
+    fn add_dirent(&self, dirent: PFSDEntry) -> Result<(), ErrorNum> {
+        let dirents = self.read_dirent_raw()?;
+        let mut empty_dirent = None;
+        for (idx, d) in dirents.iter().enumerate() {
+            if d.inode == BAD_INODE {
+                empty_dirent = Some(idx);
+                break;
+            }
+        }
+        if empty_dirent.is_none() {
+            empty_dirent = Some(dirents.len());
+            self.base.expand((dirents.len() + 1) * size_of::<PFSDEntry>())?;
+        }
+        let pos = empty_dirent.unwrap() as usize;
+        self.write_dirent_at(dirent, pos)
+    }
+}
+
 impl File for PFSDir {
     fn write(&self, data: alloc::vec::Vec::<u8>, offset: usize) -> Result<(), ErrorNum> {
         let inner = self.0.acquire();
@@ -372,12 +419,28 @@ impl DirFile for PFSDir {
                 }
             }
         }
-        Err(ErrorNum::ENOENT)
+        if mode.contains(OpenMode::CREATE) && rel_path.len() == 1 {
+            // default to create regular file
+            drop(inner);
+            self.make_file(rel_path.components[0], Permission::default(), FileType::REGULAR);
+            todo!()
+        } else {
+            Err(ErrorNum::ENOENT)
+        }
     }
 
-    fn make_file(&self, _name: String, perm: Permission, f_type: FileType) -> Result<(), ErrorNum>{
+    fn make_file(&self, name: String, perm: Permission, f_type: FileType) -> Result<Arc<dyn File>, ErrorNum>{
         if f_type != FileType::REGULAR || f_type != FileType::DIR {
             return Err(ErrorNum::EBADTYPE);
+        }
+        if name.bytes().len() > DENTRY_NAME_LEN {
+            return Err(ErrorNum::ENAMETOOLONG);
+        }
+        let dirents = self.read_dirent()?;
+        for d in dirents {
+            if d.f_name == name {
+                return Err(ErrorNum::EEXIST);
+            }
         }
         
         let inner = self.0.acquire();
@@ -401,7 +464,19 @@ impl DirFile for PFSDir {
         inode.change_time = 0xbeef;
         inode.create_time = 0xbeef;
 
-        return Ok(())
+        let bytes: Vec<u8> = name.bytes().collect();
+        let mut f_name: [u8; DENTRY_NAME_LEN] = [0; DENTRY_NAME_LEN];
+        f_name[0..bytes.len()].clone_from_slice(&bytes[..]) ;
+
+        inner.add_dirent(PFSDEntry {
+            inode: inode_no,
+            permission: perm.into(),
+            f_type: f_type.into(),
+            name_len: bytes.len() as u16,
+            f_name,
+        })?;
+
+        return Ok(self.open_dir(name.into(), OpenMode::SYS));
     }
 
     fn remove_file(&self, name: String) -> Result<(), ErrorNum> {
@@ -417,29 +492,17 @@ impl DirFile for PFSDir {
                 if inode.hard_link_count == 0 {
                     fs_inner.free_inode(e.inode.into());
                 }
-
-                let offset = idx * size_of::<PFSDEntry>();
-                let buffer = PFSDEntry::empty();
-                let u8_buf = unsafe{from_raw_parts((&buffer as *const PFSDEntry) as *const u8, size_of::<PFSDEntry>())}.to_vec();
-                inner.base.write(u8_buf, offset);
+                inner.write_dirent_at(PFSDEntry::empty(), idx);
                 return Ok(());
             }
         }
         Err(ErrorNum::ENOENT)
     }
 
-    fn read_dirent(&self) -> Result<alloc::vec::Vec<crate::fs::types::Dirent>, ErrorNum> {
-        let inner = self.0.acquire();
-        let stat = inner.base.stat()?;
-        if stat.file_size % size_of::<PFSDEntry>() != 0 {
-            panic!("Malformed FS")
-        }
-        let dirent_count = stat.file_size / size_of::<PFSDEntry>();
-        let buffer = inner.base.read(stat.file_size, 0)?;
-        let buffer = buffer.as_ptr() as *mut PFSDEntry;
-        let mut buffer = unsafe{from_raw_parts(buffer, dirent_count).to_vec()};
-        buffer.retain(|&dirent| dirent.inode != BAD_INODE);
-        Ok(buffer.iter().map(|&dirent| dirent.into()).collect())
+    fn read_dirent(&self) -> Result<alloc::vec::Vec<Dirent>, ErrorNum> {
+        let mut res = self.0.acquire().read_dirent_raw()?;
+        res.retain(|&x| x.inode != BAD_INODE);
+        Ok(res.iter().map(|&x| x.into()).collect())
     }
 }
 

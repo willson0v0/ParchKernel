@@ -40,8 +40,9 @@ impl Into<SegmentFlags> for OpenMode {
 
 pub trait VirtualFileSystem : Send + Sync + Debug {
     fn open(&self, path: &Path, mode: OpenMode) -> Result<Arc<dyn File>, ErrorNum>;
-    fn mkdir(&self, path: &Path) -> Result<Arc<dyn DirFile>, ErrorNum>;
-    fn mkfile(&self, path: &Path) -> Result<Arc<dyn RegularFile>, ErrorNum>;
+    fn mkdir(&self, path: &Path) -> Result<(), ErrorNum>;
+    fn mkfile(&self, path: &Path) -> Result<(), ErrorNum>;
+    // TODO: chmod
     fn remove(&self, path: &Path) -> Result<(), ErrorNum>;
     fn link(&self, dest: Arc<dyn File>, link_file: &Path) -> Result<Arc<dyn File>, ErrorNum>;
     fn sym_link(&self, abs_src: &Path, rel_dst: &Path) -> Result<Arc<dyn LinkFile>, ErrorNum>;
@@ -129,20 +130,33 @@ impl Path {
     }
 
     pub fn strip_head(&self) -> Self {
+        if self.is_root() {panic!("already root")}
         Self {
             components: self.components[1..].to_vec()
         }
     }
 
     pub fn strip_tail(&self) -> Self {
+        if self.is_root() {panic!("already root")}
         Self {
             components: self.components[..self.components.len() - 1].to_vec()
         }
+    }
+
+    pub fn last(&self) -> String {
+        if self.is_root() {panic!("is_root")}
+        return self.components[self.len() - 1];
     }
 }
 
 impl From<&str> for Path {
     fn from(s: &str) -> Self {
         Self::new(s).unwrap()
+    }
+}
+
+impl From<String> for Path {
+    fn from(s: String) -> Self {
+        Self::new_s(s).unwrap()
     }
 }

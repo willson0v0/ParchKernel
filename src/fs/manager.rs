@@ -79,12 +79,12 @@ impl MountManagerInner {
         fs.open(&rel_path, mode)
     }
     
-    pub fn mkdir(&self, path: &Path) -> Result<Arc<dyn DirFile>, ErrorNum> {
+    pub fn mkdir(&self, path: &Path) -> Result<(), ErrorNum> {
         let (fs, rel_path) = self.parse(path);
         fs.mkdir(&rel_path)
     }
     
-    pub fn mkfile(&self, path: &Path) -> Result<Arc<dyn RegularFile>, ErrorNum> {
+    pub fn mkfile(&self, path: &Path) -> Result<(), ErrorNum> {
         let (fs, rel_path) = self.parse(path);
         fs.mkfile(&rel_path)
     }

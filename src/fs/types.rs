@@ -40,6 +40,12 @@ bitflags! {
     }
 }
 
+impl Permission {
+    pub fn default() -> Self {
+        Self::OwnerR | Self::OwnerW | Self::GroupR | Self::OtherR
+    }
+}
+
 bitflags! {
     pub struct FileType: u16 {
         const SOCKET  = 0001;
@@ -84,7 +90,7 @@ pub trait RegularFile   : File {
 pub trait BlockFile     : File {}
 pub trait DirFile       : File {
     fn open_dir(&self, rel_path: &Path, mode: OpenMode) -> Result<Arc<dyn File>, ErrorNum>;
-    fn make_file(&self, name: String, perm: Permission, f_type: FileType) -> Result<(), ErrorNum>;
+    fn make_file(&self, name: String, perm: Permission, f_type: FileType) -> Result<Arc<dyn File>, ErrorNum>;
     fn remove_file(&self, name: String) -> Result<(), ErrorNum>;
     fn read_dirent(&self) -> Result<Vec<Dirent>, ErrorNum>;
 }
