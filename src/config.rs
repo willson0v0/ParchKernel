@@ -1,6 +1,8 @@
 use crate::mem::{PhysAddr, VirtAddr};
 
-pub const KERNEL_HEAP_SIZE  : usize = 0x10_0000;
+pub const KERNEL_HEAP_SIZE  : usize = 0x100_0000;   // 16MiB
+pub const PROC_K_STACK_SIZE : usize = 0x10_0000;    // 1MiB
+pub const PROC_U_STACK_SIZE : usize = 0x10_0000;    // 1MiB
 pub const PAGE_OFFSET		: usize = 12;
 pub const PAGE_SIZE			: usize = 1 << PAGE_OFFSET;
 pub const UART0_IRQ			: u32 = 10;
@@ -18,8 +20,12 @@ pub const MMIO_RANGES       : &[(usize, usize)] = &[
 pub const TRAMPOLINE_ADDR   : VirtAddr = VirtAddr(usize::MAX - PAGE_SIZE + 1);
 pub const U_TRAMPOLINE_ADDR : VirtAddr = VirtAddr(TRAMPOLINE_ADDR.0 - PAGE_SIZE);
 pub const TRAP_CONTEXT_ADDR : VirtAddr = VirtAddr(U_TRAMPOLINE_ADDR.0 - PAGE_SIZE);
+pub const PROC_K_STACK_ADDR : VirtAddr = VirtAddr(TRAP_CONTEXT_ADDR.0 - PAGE_SIZE - PROC_K_STACK_SIZE);
+pub const PROC_U_STACK_ADDR : VirtAddr = VirtAddr(PROC_K_STACK_ADDR.0 - PAGE_SIZE - PROC_U_STACK_SIZE);
 
 
 pub const MAX_CPUS			: usize = 16;	
 pub const CLOCK_FREQ		: usize = 12500000;
 pub const TIMER_FRAC		: usize = 10;	// trigger every 1/10 second
+
+pub const INIT_PROCESS      : &str = "/00_helloworld";

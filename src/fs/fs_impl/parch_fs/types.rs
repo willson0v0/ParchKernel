@@ -4,7 +4,7 @@ use super::{DIRECT_BLK_COUNT, INODE_SIZE, DENTRY_NAME_LEN, DENTRY_SIZE, fs::{Par
 use core::mem::size_of;
 use core::slice::from_raw_parts;
 use bitflags::*;
-
+use core::fmt::Debug;
 
 
 use alloc::{sync::{Weak, Arc}, string::String, vec::Vec};
@@ -188,6 +188,13 @@ pub struct PFSRegularInner {
 
 pub struct PFSRegular(SpinMutex<PFSRegularInner>);
 
+impl Debug for PFSRegular {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let inner = self.0.acquire();
+        f.write_fmt(format_args!("PFSRegular File @ {:?}", inner.base.path))
+    }
+}
+
 impl Drop for PFSRegular {
     fn drop(&mut self) {
         // do nothing
@@ -242,24 +249,27 @@ impl File for PFSRegular {
     fn stat(&self) -> Result<crate::fs::types::FileStat, ErrorNum> {
         self.0.acquire().base.stat()
     }
-
-    fn do_mmap(self: Arc<Self>, mem_layout: &mut crate::mem::MemLayout) -> Result<crate::mem::VirtPageNum, ErrorNum> {
-        let stat = self.stat()?;
-        let start_vpn = mem_layout.get_space(stat.file_size)?;
-        mem_layout.add_segment(VMASegment::new_at(
-            start_vpn,
-            stat.file_size,
-            0,
-            self.clone(),
-            stat.open_mode.into()
-        )?);
-        Ok(start_vpn)
-    }
 }
 
 impl RegularFile for PFSRegular {
     fn get_page(&self, offset: usize) -> Result<crate::mem::PageGuard, crate::utils::ErrorNum> {
         self.0.acquire().base.get_page(offset)
+    }
+
+    fn register_mmap(self: Arc<Self>, mem_layout: &mut crate::mem::MemLayout) -> Result<crate::mem::VirtPageNum, ErrorNum> {
+        let mut inner = self.0.acquire();
+        if let Some(start_vpn) = inner.base.mmap_start {
+            return Ok(start_vpn);   
+        }
+        let stat = inner.base.stat()?;
+        let start_vpn = mem_layout.get_space(stat.file_size)?;
+        mem_layout.register_segment(VMASegment::new_at(
+            start_vpn,
+            self.clone(),
+            stat.open_mode.into()
+        ));
+        inner.base.mmap_start = Some(start_vpn);
+        Ok(start_vpn)
     }
 }
 
@@ -273,6 +283,13 @@ pub struct PFSDir(pub SpinMutex<PFSDirInner>);
 impl Drop for PFSDir {
     fn drop(&mut self) {
         // do nothing
+    }
+}
+
+impl Debug for PFSDir {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let inner = self.0.acquire();
+        f.write_fmt(format_args!("PFSDir File @ {:?}", inner.base.path))
     }
 }
 
@@ -376,10 +393,6 @@ impl File for PFSDir {
     fn stat(&self) -> Result<crate::fs::types::FileStat, ErrorNum> {
         self.0.acquire().base.stat()
     }
-
-    fn do_mmap          (self: Arc<Self>, _mem_layout: &mut crate::mem::MemLayout) -> Result<crate::mem::VirtPageNum, ErrorNum> {
-        todo!()
-    }
 }
 
 impl DirFile for PFSDir {
@@ -422,8 +435,8 @@ impl DirFile for PFSDir {
         if mode.contains(OpenMode::CREATE) && rel_path.len() == 1 {
             // default to create regular file
             drop(inner);
-            self.make_file(rel_path.components[0], Permission::default(), FileType::REGULAR);
-            todo!()
+            self.make_file(rel_path.components[0].clone(), Permission::default(), FileType::REGULAR);
+            self.open_dir(&rel_path.components[0].clone().into(), mode)
         } else {
             Err(ErrorNum::ENOENT)
         }
@@ -476,7 +489,7 @@ impl DirFile for PFSDir {
             f_name,
         })?;
 
-        return Ok(self.open_dir(name.into(), OpenMode::SYS));
+        self.open_dir(&name.into(), OpenMode::SYS)
     }
 
     fn remove_file(&self, name: String) -> Result<(), ErrorNum> {
@@ -515,6 +528,13 @@ pub struct PFSLink(SpinMutex<PFSLinkInner>);
 impl Drop for PFSLink {
     fn drop(&mut self) {
         todo!()
+    }
+}
+
+impl Debug for PFSLink {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let inner = self.0.acquire();
+        f.write_fmt(format_args!("PFSLink File @ {:?}", inner.base.path))
     }
 }
 
@@ -564,10 +584,6 @@ impl File for PFSLink {
     }
 
     fn stat             (&self) -> Result<crate::fs::types::FileStat, ErrorNum> {
-        todo!()
-    }
-
-    fn do_mmap          (self: Arc<Self>, _mem_layout: &mut crate::mem::MemLayout) -> Result<crate::mem::VirtPageNum, ErrorNum> {
         todo!()
     }
 }

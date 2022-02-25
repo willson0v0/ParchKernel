@@ -112,6 +112,7 @@ kernel_vec:
 	// return to whatever we were doing in the kernel.
 	sret
 
+# TODO: add timer
 .globl timervec
 .align 4
 timervec:

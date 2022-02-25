@@ -5,6 +5,8 @@ mod uart;
 mod lock;
 mod time;
 mod error;
+pub mod riscv;
+pub mod elf_rs_wrapper;
 pub mod range;
 
 pub use lock::{

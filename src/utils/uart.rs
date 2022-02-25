@@ -5,7 +5,7 @@ use alloc::collections::VecDeque;
 use crate::mem::PhysAddr;
 use crate::utils::{SpinMutex, Mutex};
 use core::option::Option;
-use crate::interrupt::{ pop_intr_off, push_intr_off};
+use crate::process::{ pop_intr_off, push_intr_off};
 use lazy_static::*;
 use crate::config::UART0_ADDR;
 

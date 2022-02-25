@@ -363,19 +363,17 @@ pub type VPNRange = Range<VirtPageNum>;
 pub type PPNRange = Range<PhysPageNum>;
 
 impl PhysPageNum {
-    // FIXME: very slow
     pub unsafe fn clear_content(&self) {
-        for i in 0..PAGE_SIZE {
-            (PhysAddr::from(*self) + i).write_volatile(&0u8);
-        }
+        let empty: &[u8; PAGE_SIZE] = &[0u8; PAGE_SIZE];
+        let src: *const u8 = empty.as_ptr();
+        core::ptr::copy_nonoverlapping(src, (self.0 << PAGE_OFFSET) as *mut u8, PAGE_SIZE);
     }
 }
 
 impl VirtPageNum {
-    // FIXME: very slow
     pub unsafe fn clear_content(&self) {
-        for i in 0..PAGE_SIZE {
-            (VirtAddr::from(*self) + i).write_volatile(&0u8);
-        }
+        let empty: &[u8; PAGE_SIZE] = &[0u8; PAGE_SIZE];
+        let src: *const u8 = empty.as_ptr();
+        core::ptr::copy_nonoverlapping(src, (self.0 << PAGE_OFFSET) as *mut u8, PAGE_SIZE);
     }
 }

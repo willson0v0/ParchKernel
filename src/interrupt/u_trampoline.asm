@@ -1,7 +1,6 @@
-// TODO: Needed for signal handling
+// For signal handling
 
     .section .text.u_trampoline
-    .globl __user_call_sigreturn
     .globl __user_restore_from_handler
 
 # run in user mode

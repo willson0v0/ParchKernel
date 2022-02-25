@@ -2,9 +2,14 @@ use core::{arch::asm};
 
 use alloc::{vec::Vec, sync::Arc};
 use riscv::register::{satp};
-use crate::{utils::{SpinMutex, ErrorNum}, config::{PHYS_END_ADDR, MMIO_RANGES, TRAP_CONTEXT_ADDR, PAGE_SIZE}, mem::{TrampolineSegment, UTrampolineSegment, TrapContextSegment, IdenticalMappingSegment, segment::SegmentFlags, VirtAddr, types::VPNRange}};
+use crate::{utils::{SpinMutex, ErrorNum}, config::{PHYS_END_ADDR, MMIO_RANGES, TRAP_CONTEXT_ADDR, PAGE_SIZE, PROC_K_STACK_ADDR}, mem::{TrampolineSegment, UTrampolineSegment, TrapContextSegment, IdenticalMappingSegment, segment::SegmentFlags, VirtAddr, types::VPNRange, ManagedSegment}, fs::RegularFile, process::{push_sum_on, pop_sum_on}};
 use lazy_static::*;
-use super::{PageTable, Segment, VirtPageNum};
+use super::{PageTable, Segment, VirtPageNum, ProcKStackSegment, segment::ProcUStackSegment};
+
+use crate::utils::elf_rs_wrapper::read_elf;
+use elf_rs::*;
+use elf_rs::Elf;
+use elf_rs::ElfFile;
 
 
 lazy_static! {
@@ -38,16 +43,16 @@ impl MemLayout {
         }
         // trampoline
         verbose!("Registering Trampoline...");
-        layout.add_segment(TrampolineSegment::new());
+        layout.register_segment(TrampolineSegment::new());
         // u_trampoline
         verbose!("Registering UTrampoline...");
-        layout.add_segment(UTrampolineSegment::new());
+        layout.register_segment(UTrampolineSegment::new());
         // trap_context
         verbose!("Registering TrapContext...");
-        layout.add_segment(TrapContextSegment::new());
+        layout.register_segment(TrapContextSegment::new());
         // text
         verbose!("Registering Kernel text...");
-        layout.add_segment(
+        layout.register_segment(
             IdenticalMappingSegment::new(
                 VPNRange::new(
                     VirtAddr::from(stext as usize).into(), 
@@ -58,7 +63,7 @@ impl MemLayout {
         );
         // rodata
         verbose!("Registering Kernel rodata...");
-        layout.add_segment(
+        layout.register_segment(
             IdenticalMappingSegment::new(
                 VPNRange::new(
                     VirtAddr::from(srodata as usize).into(), 
@@ -69,7 +74,7 @@ impl MemLayout {
         );
         // data
         verbose!("Registering Kernel data...");
-        layout.add_segment(
+        layout.register_segment(
             IdenticalMappingSegment::new(
                 VPNRange::new(
                     VirtAddr::from(sdata as usize).into(), 
@@ -80,7 +85,7 @@ impl MemLayout {
         );
         // bss
         verbose!("Registering Kernel bss...");
-        layout.add_segment(
+        layout.register_segment(
             IdenticalMappingSegment::new(
                 VPNRange::new(
                     VirtAddr::from(sbss_with_stack as usize).into(), 
@@ -91,7 +96,7 @@ impl MemLayout {
         );
         // Physical memories
         verbose!("Registering Physical memory...");
-        layout.add_segment(
+        layout.register_segment(
             IdenticalMappingSegment::new(
                 VPNRange::new(
                     VirtAddr::from(ekernel as usize).into(), 
@@ -103,7 +108,7 @@ impl MemLayout {
         // MMIOS (CLINT etc.)
         verbose!("Registering MMIO...");
         for (start, end) in MMIO_RANGES {
-            layout.add_segment(
+            layout.register_segment(
                 IdenticalMappingSegment::new(
                     VPNRange::new(
                         VirtAddr::from(*start).into(), 
@@ -121,15 +126,24 @@ impl MemLayout {
         layout
     }
 
-    pub fn add_segment(&mut self, seg: Arc<dyn Segment + Send>) {
+    pub fn register_segment(&mut self, seg: Arc<dyn Segment + Send>) {
         self.segments.push(seg);
+    }
+
+    pub fn map_proc_stack(&mut self) {
+        self.register_segment(ProcKStackSegment::new());
+        self.register_segment(ProcUStackSegment::new());
+        self.do_map();
     }
 
     pub fn do_map(&mut self) {
         for seg in self.segments.iter() {
-            verbose!("Now mapping {:?} ...", seg);
-            seg.do_map(&mut self.pagetable);
-            debug!("Done mapping {:?}.", seg);
+            let map_res = seg.do_map(&mut self.pagetable);
+            if map_res.is_ok() {
+                verbose!("Done mapping {:?}.", seg);
+            } else if map_res.err().unwrap() != ErrorNum::EMMAPED {
+                panic!("Unknown mapping error {:?}", map_res.err().unwrap());
+            }
         }
     }
 
@@ -153,7 +167,7 @@ impl MemLayout {
 
     // length in byte
     pub fn get_space(&self, length: usize) -> Result<VirtPageNum, ErrorNum> {
-        let vpn_top = VirtPageNum::from(TRAP_CONTEXT_ADDR - PAGE_SIZE);
+        let vpn_top = VirtPageNum::from(PROC_K_STACK_ADDR - PAGE_SIZE);
         let vpn_bottom = VirtPageNum::from(VirtAddr::from(PHYS_END_ADDR.0));
         let page_count = (length / PAGE_SIZE) + 2; // guard page
         for vpn_s in VPNRange::new(vpn_top - page_count, vpn_bottom) {
@@ -173,12 +187,80 @@ impl MemLayout {
         Err(ErrorNum::ENOMEM)
     }
 
-    pub fn get_segment(&self, start_vpn: VirtPageNum) -> Option<Arc<dyn Segment>> {
+    pub fn get_segment(&self, start_vpn: VirtPageNum) -> Result<Arc<dyn Segment>, ErrorNum> {
         for seg in self.segments.iter() {
             if seg.start_vpn() == start_vpn {
-                return Some(seg.clone());
+                return Ok(seg.clone());
             }
         }
-        return None;
+        return Err(ErrorNum::ENOSEG);
+    }
+
+    pub fn unmap_segment(&mut self, start_vpn: VirtPageNum) -> Result<(), ErrorNum> {
+        let seg = self.get_segment(start_vpn)?;
+        seg.do_unmap(&mut self.pagetable);
+        Ok(())
+    }
+
+    pub fn remove_segment(&mut self, start_vpn: VirtPageNum) -> Result<(), ErrorNum> {
+        self.unmap_segment(start_vpn)?;
+        self.segments.retain(|x| x.start_vpn() != start_vpn);
+        Ok(())
+    }
+
+    pub fn map_elf(&mut self, elf_file: Arc<dyn RegularFile>) -> Result<VirtAddr, ErrorNum> {
+        verbose!("Mapping elf into memory space");
+        // first map it for easy reading...
+        let first_map = elf_file.clone().register_mmap(self)?;
+        self.do_map();
+        let stat = elf_file.stat()?;
+
+        // some dirty trick for zero copy
+        let start_va: VirtAddr = first_map.into();
+        let start_ptr = start_va.0 as *mut u8;
+        let buffer = unsafe{core::slice::from_raw_parts(start_ptr, stat.file_size)};
+
+        let elf = read_elf(buffer)?;
+
+        debug!("Loading {:?} into mem_layout...", elf_file);
+        
+        verbose!("elf Info: {:?}", elf);
+        verbose!("Header Info: {:?}", elf.elf_header());
+        for p in elf.program_header_iter() {
+            verbose!("Handling PH {:x?}", p);
+            if p.ph_type() == ProgramType::LOAD {
+                let seg_start: VirtAddr = (p.vaddr() as usize).into();
+                let seg_end: VirtAddr = seg_start + p.memsz() as usize;
+                if seg_start.0 % PAGE_SIZE != 0 {
+                    panic!("Program header not aligned!")
+                }
+                let seg_start: VirtPageNum = seg_start.into();
+                let seg_end = seg_end.to_vpn_ceil();
+                let mut seg_flag = SegmentFlags::U;
+                if p.flags().contains(ProgramHeaderFlags::EXECUTE) {
+                    seg_flag = seg_flag | SegmentFlags::X;
+                }
+                if p.flags().contains(ProgramHeaderFlags::READ) {
+                    seg_flag = seg_flag | SegmentFlags::R;
+                }
+                if p.flags().contains(ProgramHeaderFlags::WRITE) {
+                    seg_flag = seg_flag | SegmentFlags::W;
+                }
+                let segment = ManagedSegment::new(VPNRange::new(seg_start, seg_end + 1), seg_flag);
+                self.register_segment(segment);
+                self.do_map();
+                // copy data into it
+                push_sum_on();
+                let src = unsafe{ buffer.as_ptr().add(p.offset() as usize)};
+                let dst = VirtAddr::from(seg_start).0 as *mut u8;
+                let len = p.filesz() as usize;
+                unsafe{core::ptr::copy_nonoverlapping(src, dst, len)}
+                pop_sum_on();
+            }
+        }
+        let entry_point = elf.entry_point() as usize;
+        // free the first mmap...
+        self.remove_segment(first_map)?;
+        Ok(entry_point.into())
     }
 }

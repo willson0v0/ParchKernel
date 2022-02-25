@@ -4,7 +4,7 @@ use core::ops::{Deref, DerefMut};
 use core::sync::atomic::{Ordering, AtomicBool};
 use core::option::Option;
 use alloc::string::String;
-use crate::interrupt::{get_hart_id, pop_intr_off, push_intr_off};
+use crate::process::{get_hart_id, pop_intr_off, push_intr_off, get_processor};
 
 pub trait Mutex<T> {
     fn acquire(&self) -> MutexGuard<'_, T>;
@@ -124,7 +124,7 @@ impl<T> Mutex<T> for SleepMutex<T> {
     fn acquire(&self) -> MutexGuard<'_, T> {
         // TODO: Check if is a Kernel thread for Proc is acquiring SleepMutex. Scheduler kernel thread is not allowed to use this.
         while !self.is_acquired.swap(true, Ordering::AcqRel) {
-            // TODO: Yield cpu
+            get_processor().suspend_switch();
         }
         // change after lock has been successfully acquired, thus refcell is safe to change
         *self.acquired_by.borrow_mut() = Some(get_hart_id());

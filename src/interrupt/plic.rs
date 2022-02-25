@@ -2,7 +2,7 @@ use core::mem::size_of;
 
 use crate::{config::{PLIC_ADDR}, mem::PhysAddr};
 use alloc::vec::{Vec};
-use super::get_hart_id;
+use crate::process::get_hart_id;
 use lazy_static::*;
 
 lazy_static!{

@@ -19,6 +19,7 @@ buddy_system_allocator = "0.8.0"
 riscv = "0.7.0"
 lazy_static = { version = "1.4.0", features = ["spin_no_std"] }
 static_assertions = "1.1.0"
+elf_rs = "0.2.0"
 
 [build-dependencies]
 chrono = "0.4"

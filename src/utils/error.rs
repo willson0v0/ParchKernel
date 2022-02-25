@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 #[repr(u64)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ErrorNum {
     /// Operation not permitted
     EPERM           = 1     ,   
@@ -274,4 +274,8 @@ pub enum ErrorNum {
     EBADTYPE        = 1004,
     /// ParchFS file not mapped
     ENOTMAPPED      = 1005,
+    /// No such segment
+    ENOSEG          = 1006,
+    /// Already mmaped
+    EMMAPED         = 1007,
 }

@@ -8,7 +8,7 @@ use riscv::register::{scause::{   // s cause register
     }, sepc, sip, sstatus::{self, SPP}, stval, stvec};
 
 use super::PLIC0;
-use crate::config::UART0_IRQ;
+use crate::{config::{UART0_IRQ, TRAMPOLINE_ADDR, PROC_K_STACK_ADDR, PROC_K_STACK_SIZE, TRAP_CONTEXT_ADDR, PROC_U_STACK_ADDR, PROC_U_STACK_SIZE}, process::{get_processor, ProcessStatus, intr_off, get_hart_id}, mem::VirtAddr, interrupt::trap_context::TrapContext};
 use crate::utils::UART0;
 
 /// Set trap entry to kernel trap handling function.
@@ -91,4 +91,42 @@ pub fn kernel_trap() {
             panic!("Kernel panic");
         }
     }
+}
+
+#[no_mangle]
+pub fn user_trap() -> ! {
+    todo!()
+}
+
+#[no_mangle]
+pub fn trap_return() -> ! {
+    let pcb = get_processor().current().unwrap();
+    let mut pcb_inner = pcb.get_inner();
+    let mut trap_context = TrapContext::get_ref();
+    if pcb_inner.status == ProcessStatus::Initialized {
+        pcb_inner.entry_point = pcb_inner.mem_layout.map_elf(pcb.elf_file.clone()).unwrap();
+        pcb_inner.status = ProcessStatus::Running;
+        trap_context.epc = pcb_inner.entry_point;
+        trap_context.sp = (PROC_U_STACK_ADDR + PROC_U_STACK_SIZE).0;
+    }
+    trap_context.kernel_sp = PROC_K_STACK_ADDR + PROC_K_STACK_SIZE;
+    trap_context.user_trap = (user_trap as usize).into();
+    trap_context.hart_id = get_hart_id();
+    extern "C" {
+        fn uservec();
+        fn userret();
+        fn trampoline();
+    }
+    let uservec_addr: VirtAddr = TRAMPOLINE_ADDR + ((uservec as usize) - (trampoline as usize));
+    let userret_addr: VirtAddr = TRAMPOLINE_ADDR + ((userret as usize) - (trampoline as usize));
+    intr_off();
+    unsafe {
+        let userret_fp: extern "C" fn(VirtAddr) -> ! = core::mem::transmute(userret_addr.0 as *const ());
+        stvec::write(uservec_addr.0, stvec::TrapMode::Direct);
+        sstatus::set_spie();
+        sstatus::set_spp(SPP::User);
+        sepc::write(trap_context.epc.0);
+        userret_fp(TRAP_CONTEXT_ADDR);
+    }
+    unreachable!("Trap return unreachable")
 }

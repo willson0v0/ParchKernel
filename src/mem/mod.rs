@@ -43,6 +43,7 @@ pub use segment::{
     TrampolineSegment,
     UTrampolineSegment,
     TrapContextSegment,
+    ProcKStackSegment,
     SegmentFlags
 };
 
@@ -66,5 +67,8 @@ pub fn init() {
     // for i in PARange::new((sbss as usize).into(), (ebss as usize).into()) {
     //     unsafe{ i.write_volatile(&0u8); }
     // }
+}
+
+pub fn hart_init() {
     SCHEDULER_MEM_LAYOUT.acquire().activate();
 }

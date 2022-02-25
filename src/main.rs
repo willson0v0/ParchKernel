@@ -4,6 +4,7 @@
 #![feature(exclusive_range_pattern)]
 #![feature(panic_info_message)]
 #![feature(step_trait)]
+#![feature(is_some_with)]
 #![allow(dead_code)]
 
 // lock sequence
@@ -27,17 +28,21 @@ mod process;
 extern crate alloc;
 extern crate lazy_static;
 extern crate static_assertions;
+extern crate elf_rs;
 
 use core::{arch::{global_asm, asm}};
 
 global_asm!(include_str!("crt_setup.asm"));
 global_asm!(include_str!("interrupt/kernel_trap.asm"));
 global_asm!(include_str!("interrupt/trampoline.asm"));
+global_asm!(include_str!("interrupt/u_trampoline.asm"));
 
 
 use riscv::register::{medeleg, mepc, mhartid, mideleg, mie, mscratch, mstatus, mtvec, pmpaddr0, pmpcfg0, satp, sie, sstatus, stvec};
 
 use alloc::string::String;
+
+use crate::{mem::SCHEDULER_MEM_LAYOUT, utils::Mutex};
 
 static mut MSCRATCH_ARR: [[usize; 6]; config::MAX_CPUS] = [[0; 6]; config::MAX_CPUS];
 
@@ -114,7 +119,9 @@ extern "C" fn genesis_m() -> ! {
 
 #[no_mangle]
 extern "C" fn genesis_s() {
-    if interrupt::get_hart_id() == 0 {
+    process::intr_off();
+    let mut hart0_fin = false;
+    if process::get_hart_id() == 0 {
         // common init code (mm/fs)
         unsafe {
             extern "C" {
@@ -124,16 +131,20 @@ extern "C" fn genesis_s() {
             stvec::write(kernel_vec as usize, stvec::TrapMode::Direct)
         }
         mem::init();
+        mem::hart_init();
+        
         println!("\r\n\n\n\nParch OS\n");
         println!("Ver\t: {}", version::VERSION);
 
-        let res = fs::open(&fs::Path::new("/hello_world").unwrap(), fs::OpenMode::SYS).unwrap();
-        let stat = res.stat().unwrap();
-        let content = res.read(stat.file_size, 0).unwrap();
-        print!("{}", String::from_utf8(content).unwrap());
+        process::init();
+
+        hart0_fin = true;
     } else {
-        // hart specific init code
+        while !hart0_fin {}
+        mem::hart_init();
     }
+    
+    process::hart_init();
     
     loop{
         print!("a");

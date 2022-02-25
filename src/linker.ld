@@ -15,8 +15,8 @@ SECTIONS
     stext = .;
     .text : {
         *(.text.entry)
-        *(.text .text.*)
-        . = ALIGN(0x1000);
+        *(.text)
+        . = ALIGN(4K);
         strampoline = .;
         *(.text.trampoline);
         *(.text.trampoline_rust);

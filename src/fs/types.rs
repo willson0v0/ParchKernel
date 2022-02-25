@@ -1,3 +1,4 @@
+use core::fmt::Debug;
 use alloc::string::String;
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
@@ -66,7 +67,7 @@ pub struct DEntry {
     name: String
 }
 
-pub trait File: Send + Sync + Drop {
+pub trait File: Send + Sync + Drop + Debug {
     fn write            (&self, data: Vec::<u8>, offset: usize) -> Result<(), ErrorNum>;
     fn read             (&self, length: usize, offset: usize) -> Result<Vec<u8>, ErrorNum>;
     fn as_socket    <'a>(self: Arc<Self>) -> Result<Arc<dyn SocketFile   + 'a>, ErrorNum> where Self: 'a;
@@ -79,13 +80,13 @@ pub trait File: Send + Sync + Drop {
     fn as_file      <'a>(self: Arc<Self>) -> Arc<dyn File + 'a> where Self: 'a;
     fn vfs              (&self) -> Arc<dyn VirtualFileSystem>;
     fn stat             (&self) -> Result<FileStat, ErrorNum>;
-    fn do_mmap          (self: Arc<Self>, mem_layout: &mut MemLayout) -> Result<VirtPageNum, ErrorNum>;
 }
 
 pub trait SocketFile    : File {}
 pub trait LinkFile      : File {}
 pub trait RegularFile   : File {
     fn get_page(&self, offset: usize) -> Result<PageGuard, ErrorNum>;
+    fn register_mmap(self: Arc<Self>, mem_layout: &mut MemLayout) -> Result<VirtPageNum, ErrorNum>;
 }
 pub trait BlockFile     : File {}
 pub trait DirFile       : File {

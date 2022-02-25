@@ -82,14 +82,14 @@ impl ParchFS {
     }
 
     pub fn create_path(&self, path: &Path) -> Result<Arc<dyn DirFile>, ErrorNum> {
-        if path.is_root() {return Ok(());}
+        if path.is_root() {return Ok(self.root_dir(OpenMode::SYS));}
         let mut dir = self.root_dir(OpenMode::SYS);
         let mut path = path.clone();
         while path.len() >= 1 {
-            let cur_name = path.components[0];
-            let res = dir.make_file(cur_name.into(), Permission::default(), FileType::DIR);
-            if res.is_err_with(|x| x==ErrorNum::EEXIST) {
-                dir = dir.open_dir(cur_name.into(), OpenMode::SYS)?.as_dir()?;
+            let cur_name = path.components[0].clone();
+            let res = dir.make_file(cur_name.clone().into(), Permission::default(), FileType::DIR);
+            if res.is_err_with(|&x| x==ErrorNum::EEXIST) {
+                dir = dir.open_dir(&cur_name.into(), OpenMode::SYS)?.as_dir()?;
             } else if let Ok(open_res) = res {
                 dir = open_res.as_dir()?;
             } else {
@@ -174,6 +174,9 @@ impl ParchFSInner {
 
 impl VirtualFileSystem for ParchFS {
     fn open(&self, path: &crate::fs::Path, mode: crate::fs::vfs::OpenMode) -> Result<alloc::sync::Arc<dyn crate::fs::File>, crate::utils::ErrorNum> {
+        if mode.contains(OpenMode::CREATE) {
+            self.mkfile(path)?;
+        }
         // Note: cannot use open "/" or root_dir() here
         let root_dir = Arc::new(
             PFSDir(SpinMutex::new("PFS ROOT", crate::fs::fs_impl::parch_fs::PFSDirInner { base: PFSBase {
@@ -201,6 +204,7 @@ impl VirtualFileSystem for ParchFS {
     }
 
     fn remove(&self, path: &crate::fs::Path) -> Result<(), crate::utils::ErrorNum> {
+        if path.is_root() {return Err(ErrorNum::EPERM);}
         let dir = self.open(&path.strip_tail(), OpenMode::SYS)?.as_dir()?;
         dir.remove_file(path.last())
     }

@@ -112,7 +112,9 @@ impl PageAllocator for BitMapPageAllocator {
 				let ppn = PhysPageNum::from(PhysAddr::from(BASE_ADDRESS as usize)) + block_id;
 				// verbose!("Alloced: {:?}", ppn);
 				self.mark_unavailable(ppn, is_exec);
-				unsafe{ppn.clear_content()}
+				if cfg!(debug_assertions) {
+					unsafe{ppn.clear_content();}
+				}
 				Some(ppn)
 			}
 		)
@@ -126,7 +128,9 @@ impl PageAllocator for BitMapPageAllocator {
 			assert!(!self.bitmap_mm.get(block_id), "Freeing exec page");
 		}
 		assert!(self.bitmap_fs.get(block_id), "Freeing free page");
-		unsafe{to_free.clear_content();}
+		if cfg!(debug_assertions) {
+			unsafe{to_free.clear_content();}
+		}
         self.mark_available(to_free, is_exec);
 		verbose!("Freed: {:?}", to_free)
     }

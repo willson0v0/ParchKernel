@@ -145,7 +145,7 @@ impl Path {
 
     pub fn last(&self) -> String {
         if self.is_root() {panic!("is_root")}
-        return self.components[self.len() - 1];
+        return self.components[self.len() - 1].clone();
     }
 }
 

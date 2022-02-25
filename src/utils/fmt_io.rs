@@ -3,7 +3,7 @@
 
 use alloc::string::String;
 
-use crate::interrupt::{push_intr_off, pop_intr_off};
+use crate::process::{push_intr_off, pop_intr_off};
 
 use super::UART0;
 use core::fmt::{self, Write};
@@ -143,6 +143,7 @@ pub fn do_log(log_level: LogLevel, args: fmt::Arguments) {
 
 
 pub fn log(log_level: LogLevel, args: fmt::Arguments) {
+    push_intr_off();
     match log_level {
         LogLevel::Verbose => {
             if cfg!(feature = "log_verbose") {
@@ -180,6 +181,7 @@ pub fn log(log_level: LogLevel, args: fmt::Arguments) {
             }
         },
     }
+    pop_intr_off();
 }
 
 #[macro_export]
