@@ -1,6 +1,6 @@
-use alloc::sync::Arc;
+use alloc::{sync::Arc, collections::BTreeMap};
 
-use crate::{mem::{MemLayout, PageGuard, alloc_vm_page, VirtAddr}, utils::{SpinMutex, MutexGuard, Mutex, ErrorNum}, fs::{Path, open, OpenMode, RegularFile}};
+use crate::{mem::{MemLayout, VirtAddr}, utils::{SpinMutex, MutexGuard, Mutex, ErrorNum}, fs::{Path, open, OpenMode, RegularFile, File}};
 
 use super::{ProcessID, new_pid, processor::ProcessContext};
 
@@ -18,11 +18,22 @@ pub struct ProcessControlBlock {
     inner: SpinMutex<PCBInner>
 }
 
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct FileDescriptor(usize);
+
+impl From<usize> for FileDescriptor {
+    fn from(c: usize) -> Self {
+        Self(c)
+    }
+}
+
 pub struct PCBInner {
     pub mem_layout: MemLayout,
     pub status: ProcessStatus,
     pub proc_context: ProcessContext,
     pub entry_point: VirtAddr,
+    pub fd: BTreeMap<FileDescriptor, Arc<dyn File>>,
+    pub trace: bool
 }
 
 impl ProcessControlBlock {
@@ -48,11 +59,17 @@ impl ProcessControlBlock {
 
 impl PCBInner {
     pub fn new(mem_layout: MemLayout) -> Self {
+        let mut fd: BTreeMap<FileDescriptor, Arc<dyn File>> = BTreeMap::new();
+        fd.insert(0.into(), open(&Path::new("/dev/pts").unwrap(), OpenMode::READ).unwrap());
+        fd.insert(1.into(), open(&Path::new("/dev/pts").unwrap(), OpenMode::WRITE).unwrap());
+        fd.insert(2.into(), open(&Path::new("/dev/pts").unwrap(), OpenMode::WRITE).unwrap());
         Self {
             mem_layout,
             status: ProcessStatus::Initialized,
             entry_point: 0.into(),
-            proc_context: ProcessContext::new()
+            proc_context: ProcessContext::new(),
+            fd,
+            trace: if cfg!(debug_assertions) {true} else  {false}
         }
     }
 

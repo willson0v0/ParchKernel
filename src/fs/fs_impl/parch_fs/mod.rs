@@ -11,7 +11,7 @@ use lazy_static::*;
 use self::fs::ParchFS;
 
 lazy_static!{
-    pub static ref PARCH_FS: alloc::sync::Arc<ParchFS> = alloc::sync::Arc::new(ParchFS::new());
+    pub static ref PARCH_FS: alloc::sync::Arc<ParchFS> = alloc::sync::Arc::new(ParchFS::new("/".into()));
 }
 
 pub use base::PFSBase;

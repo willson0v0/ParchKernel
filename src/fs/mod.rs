@@ -29,9 +29,15 @@ use lazy_static::*;
 use crate::utils::Mutex;
 
 lazy_static!{
-    pub static ref MOUNT_MANAGER: MountManager = MountManager::new(fs_impl::PARCH_FS.clone());
+    pub static ref MOUNT_MANAGER: MountManager = MountManager::new();
 }
 
 pub fn open(path: &Path, mode: OpenMode) -> Result<alloc::sync::Arc<dyn File>, crate::utils::ErrorNum> {
     MOUNT_MANAGER.inner.acquire().open(path, mode)
+}
+
+pub fn init() {
+    let mut inner = MOUNT_MANAGER.inner.acquire();
+    inner.mount("/".into(), fs_impl::PARCH_FS.clone());
+    inner.mount("/dev".into(), fs_impl::DEV_FS.clone());
 }

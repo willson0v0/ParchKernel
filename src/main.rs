@@ -23,6 +23,7 @@ mod interrupt;
 mod version;
 mod fs;
 mod process;
+mod syscall;
 
 #[macro_use]
 extern crate alloc;
@@ -38,11 +39,11 @@ global_asm!(include_str!("interrupt/trampoline.asm"));
 global_asm!(include_str!("interrupt/u_trampoline.asm"));
 
 
-use riscv::register::{medeleg, mepc, mhartid, mideleg, mie, mscratch, mstatus, mtvec, pmpaddr0, pmpcfg0, satp, sie, sstatus, stvec};
+use riscv::register::{medeleg, mepc, mhartid, mideleg, mie, mscratch, mstatus, mtvec, pmpaddr0, pmpcfg0, satp, sie};
 
-use alloc::string::String;
 
-use crate::{mem::SCHEDULER_MEM_LAYOUT, utils::Mutex};
+
+
 
 static mut MSCRATCH_ARR: [[usize; 6]; config::MAX_CPUS] = [[0; 6]; config::MAX_CPUS];
 
@@ -119,22 +120,18 @@ extern "C" fn genesis_m() -> ! {
 
 #[no_mangle]
 extern "C" fn genesis_s() {
-    process::intr_off();
     let mut hart0_fin = false;
     if process::get_hart_id() == 0 {
         // common init code (mm/fs)
-        unsafe {
-            extern "C" {
-                fn kernel_vec();
-            }
-            sstatus::set_sie();
-            stvec::write(kernel_vec as usize, stvec::TrapMode::Direct)
-        }
+        interrupt::set_kernel_trap_entry();
+        process::intr_on();
         mem::init();
         mem::hart_init();
         
         println!("\r\n\n\n\nParch OS\n");
         println!("Ver\t: {}", version::VERSION);
+
+        fs::init();
 
         process::init();
 

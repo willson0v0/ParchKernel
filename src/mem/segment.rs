@@ -4,7 +4,7 @@ use alloc::{sync::{Arc}, collections::BTreeMap, vec::Vec};
 use bitflags::*;
 use crate::{config::{PAGE_SIZE, PROC_K_STACK_SIZE, PROC_K_STACK_ADDR, PROC_U_STACK_SIZE, PROC_U_STACK_ADDR}, utils::{SpinMutex, Mutex}};
 use crate::{fs::{RegularFile, File}, utils::ErrorNum, config::{TRAMPOLINE_ADDR, U_TRAMPOLINE_ADDR, TRAP_CONTEXT_ADDR}};
-use crate::fs::OpenMode;
+
 use super::{types::{VPNRange, VirtPageNum, PhysPageNum}, PageGuard, pagetable::{PageTable, PTEFlags}, alloc_vm_page, PhysAddr};
 
 
@@ -646,7 +646,7 @@ impl ManagedSegment {
 
 impl VMASegment {
     pub fn new_at(start_vpn: VirtPageNum, file: Arc<dyn RegularFile>, flag: SegmentFlags) -> Arc<Self> {
-        let mut res = VMASegmentInner {
+        let res = VMASegmentInner {
             frames: BTreeMap::new(),
             file: file.clone(),
             flag,

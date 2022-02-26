@@ -27,7 +27,7 @@ impl PFSBase {
         // let cpu = get_cpu();
         // let cpu_inner = cpu.acquire();
         // let fs = fs.upgrade().unwrap();
-        // let mut fs_inner = fs.0.acquire();
+        // let mut fs_inner = fs.inner.acquire();
         // if let Some(pcb) = &cpu_inner.pcb {
         //     let mut pcb_inner = pcb.get_inner();
         //     let mem_layout = &mut pcb_inner.mem_layout;
@@ -170,7 +170,7 @@ impl PFSBase {
     pub fn get_blockno(&self, offset: usize, create: bool) -> Result<BlockNo, ErrorNum> {
         let offset: usize = offset as usize;
         let fs = self.fs.clone().upgrade().unwrap();
-        let mut fs_inner = fs.0.acquire();
+        let mut fs_inner = fs.inner.acquire();
         let inode_guard = fs_inner.get_inode(self.inode_no)?;
         let mut inode = inode_guard.acquire();
         self.get_blockno_locked(offset, create, &mut fs_inner, &mut inode)
@@ -189,7 +189,7 @@ impl PFSBase {
     pub fn resize(&self, new_size: usize) -> Result<(), ErrorNum> {
         let new_size: usize = new_size as usize;
         let fs = self.fs.clone().upgrade().unwrap();
-        let mut fs_inner = fs.0.acquire();
+        let mut fs_inner = fs.inner.acquire();
         let inode_guard = fs_inner.get_inode(self.inode_no)?;
         let mut inode = inode_guard.acquire();
         self.resize_locked(new_size, &mut fs_inner, &mut inode)
@@ -279,7 +279,7 @@ impl PFSBase {
 
     pub fn f_type(&self) -> Result<FileType, ErrorNum> {
         let fs = self.fs.clone().upgrade().unwrap();
-        let mut fs_inner = fs.0.acquire();
+        let mut fs_inner = fs.inner.acquire();
         let inode_guard = fs_inner.get_inode(self.inode_no)?;
         let inode = inode_guard.acquire();
         Ok(inode.f_type.into())
@@ -289,7 +289,7 @@ impl PFSBase {
     pub fn write(&self, data: alloc::vec::Vec::<u8>, mut offset: usize) -> Result<(), crate::utils::ErrorNum> {
         if data.len() == 0 {return Ok(())}
         let fs = self.fs.upgrade().unwrap();
-        let mut fs_inner = fs.0.acquire();
+        let mut fs_inner = fs.inner.acquire();
         let inode_guard = fs_inner.get_inode(self.inode_no)?;
         let mut inode = inode_guard.acquire();
         if inode.f_size < offset + data.len() {
@@ -301,7 +301,7 @@ impl PFSBase {
             Ok(())
         } else {
             let fs = self.fs.upgrade().unwrap();
-            let mut fs_inner = fs.0.acquire();
+            let mut fs_inner = fs.inner.acquire();
             let inode_guard = fs_inner.get_inode(self.inode_no)?;
             let mut inode = inode_guard.acquire();
             let length = data.len();
@@ -331,7 +331,7 @@ impl PFSBase {
             }
         } else {
             let fs = self.fs.upgrade().unwrap();
-            let mut fs_inner = fs.0.acquire();
+            let mut fs_inner = fs.inner.acquire();
             let inode_guard = fs_inner.get_inode(self.inode_no)?;
             let mut inode = inode_guard.acquire();
             let mut result: Vec<u8> = Vec::new();
@@ -359,10 +359,10 @@ impl PFSBase {
 
     pub fn stat(&self) -> Result<crate::fs::types::FileStat, ErrorNum> {
         let fs_guard = self.fs.upgrade().unwrap();
-        let mut fs = fs_guard.0.acquire();
+        let mut fs = fs_guard.inner.acquire();
         let inode_guard = fs.get_inode(self.inode_no)?;
         let inode = inode_guard.acquire();
-
+        // let fs_mount_path ;
         Ok(crate::fs::types::FileStat { 
             open_mode: self.open_mode, 
             file_size: inode.f_size,

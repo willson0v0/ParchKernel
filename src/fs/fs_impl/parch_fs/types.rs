@@ -58,15 +58,15 @@ impl BlockNo {
 
 bitflags! {
     pub struct PFSPerm: u16 {
-        const OwnerR = 0400;
-        const OwnerW = 0200;
-        const OwnerX = 0100;
-        const GroupR = 0040;
-        const GroupW = 0020;
-        const GroupX = 0010;
-        const OtherR = 0004;
-        const OtherW = 0002;
-        const OtherX = 0001;
+        const OWNER_R = 0400;
+        const OWNER_W = 0200;
+        const OWNER_X = 0100;
+        const GROUP_R = 0040;
+        const GROUP_W = 0020;
+        const GROUP_X = 0010;
+        const OTHER_R = 0004;
+        const OTHER_W = 0002;
+        const OTHER_X = 0001;
     }
 }
 
@@ -302,7 +302,7 @@ impl PFSDirInner {
         let dirent_count = stat.file_size / size_of::<PFSDEntry>();
         let buffer = self.base.read(stat.file_size, 0)?;
         let buffer = buffer.as_ptr() as *mut PFSDEntry;
-        let mut buffer = unsafe{from_raw_parts(buffer, dirent_count).to_vec()};
+        let buffer = unsafe{from_raw_parts(buffer, dirent_count).to_vec()};
         Ok(buffer)
     }
 
@@ -458,7 +458,7 @@ impl DirFile for PFSDir {
         
         let inner = self.0.acquire();
         let fs = inner.base.fs.upgrade().unwrap();
-        let mut fs_inner = fs.0.acquire();
+        let mut fs_inner = fs.inner.acquire();
         let inode_no = fs_inner.alloc_inode();
         let inode_guard = fs_inner.get_inode(inode_no)?;
         let mut inode = inode_guard.acquire();
@@ -498,7 +498,7 @@ impl DirFile for PFSDir {
             if e.f_name == name {
                 let inner = self.0.acquire();
                 let fs = inner.base.fs.upgrade().unwrap();
-                let mut fs_inner = fs.0.acquire();
+                let mut fs_inner = fs.inner.acquire();
                 let inode_guard = fs_inner.get_inode(e.inode.into())?;
                 let mut inode = inode_guard.acquire();
                 inode.hard_link_count -= 1;

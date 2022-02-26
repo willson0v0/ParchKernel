@@ -8,11 +8,11 @@ use riscv::register::{scause::{   // s cause register
     }, sepc, sip, sstatus::{self, SPP}, stval, stvec};
 
 use super::PLIC0;
-use crate::{config::{UART0_IRQ, TRAMPOLINE_ADDR, PROC_K_STACK_ADDR, PROC_K_STACK_SIZE, TRAP_CONTEXT_ADDR, PROC_U_STACK_ADDR, PROC_U_STACK_SIZE}, process::{get_processor, ProcessStatus, intr_off, get_hart_id}, mem::VirtAddr, interrupt::trap_context::TrapContext};
+use crate::{config::{UART0_IRQ, TRAMPOLINE_ADDR, PROC_K_STACK_ADDR, PROC_K_STACK_SIZE, TRAP_CONTEXT_ADDR, PROC_U_STACK_ADDR, PROC_U_STACK_SIZE}, process::{get_processor, ProcessStatus, intr_off, get_hart_id, intr_on}, mem::VirtAddr, interrupt::trap_context::TrapContext, syscall::syscall};
 use crate::utils::UART0;
 
 /// Set trap entry to kernel trap handling function.
-fn set_kernel_trap_entry() {
+pub fn set_kernel_trap_entry() {
     unsafe {
         extern "C" {
             fn kernel_vec();
@@ -43,7 +43,7 @@ pub fn kernel_trap() {
             }
         },
         Trap::Interrupt(Interrupt::SupervisorSoft) => {
-            debug!("Supervisor Soft Interrupt");
+            verbose!("Supervisor Soft Interrupt");
             // riscv::register::sip
             // for some reason sip was not provided with write interface...
             let cleared_sip = sip::read().bits() & !2;
@@ -95,7 +95,80 @@ pub fn kernel_trap() {
 
 #[no_mangle]
 pub fn user_trap() -> ! {
-    todo!()
+    let scause = scause::read();
+    let stval = stval::read();
+    let sstatus = sstatus::read();
+    let sepc = sepc::read();
+    let trap_context = TrapContext::get_ref();
+    trap_context.epc = sepc.into();
+
+    assert!(sstatus.spp() == SPP::User, "user_trap not from user mode");
+    set_kernel_trap_entry();
+
+    match scause.cause() {
+        Trap::Exception(Exception::UserEnvCall) => {
+            verbose!("UserEnvCall, epc @ {:?}", trap_context.epc);
+            let syscall_id = trap_context.a7;
+            let args = [
+                trap_context.a0,
+                trap_context.a1,
+                trap_context.a2,
+                trap_context.a3,
+                trap_context.a4,
+                trap_context.a5,
+            ];
+            trap_context.epc += 4;
+            intr_on();
+            let res = syscall(syscall_id, args);
+            if let Ok(ret_val) = res {
+                trap_context.a0 = ret_val;
+            } else {
+                trap_context.a0 = res.unwrap_err().to_ret();
+            }
+        },
+        Trap::Interrupt(Interrupt::SupervisorTimer) => {
+            get_processor().suspend_switch();
+        },
+        Trap::Interrupt(Interrupt::SupervisorSoft) => {
+            get_processor().suspend_switch();
+        },
+        _ => {
+            fatal!("Unexpected scause:");
+            match scause.cause() {
+                Trap::Exception(exception) => {
+                    match exception {
+                        Exception::InstructionMisaligned => fatal!("Exception::InstructionMisaligned"),
+                        Exception::InstructionFault      => fatal!("Exception::InstructionFault     "),
+                        Exception::IllegalInstruction    => fatal!("Exception::IllegalInstruction   "),
+                        Exception::Breakpoint            => fatal!("Exception::Breakpoint           "),
+                        Exception::LoadFault             => fatal!("Exception::LoadFault            "),
+                        Exception::StoreMisaligned       => fatal!("Exception::StoreMisaligned      "),
+                        Exception::StoreFault            => fatal!("Exception::StoreFault           "),
+                        Exception::UserEnvCall           => fatal!("Exception::UserEnvCall          "),
+                        Exception::InstructionPageFault  => fatal!("Exception::InstructionPageFault "),
+                        Exception::LoadPageFault         => fatal!("Exception::LoadPageFault        "),
+                        Exception::StorePageFault        => fatal!("Exception::StorePageFault       "),
+                        Exception::Unknown               => fatal!("Exception::Unknown              "),
+                    }
+                },
+                Trap::Interrupt(interrupt) => {
+                    match interrupt {
+                        Interrupt::UserSoft             => fatal!("Interrupt::UserSoft             "),
+                        Interrupt::SupervisorSoft       => fatal!("Interrupt::SupervisorSoft       "),
+                        Interrupt::UserTimer            => fatal!("Interrupt::UserTimer            "),
+                        Interrupt::SupervisorTimer      => fatal!("Interrupt::SupervisorTimer      "),
+                        Interrupt::UserExternal         => fatal!("Interrupt::UserExternal         "),
+                        Interrupt::SupervisorExternal   => fatal!("Interrupt::SupervisorExternal   "),
+                        Interrupt::Unknown              => fatal!("Interrupt::Unknown              "),
+                    }
+                }
+            }
+            fatal!("STVAL: {:x}", stval);
+            fatal!("SEPC : {:x}", sepc::read());
+            panic!("Kernel panic");
+        }
+    }
+    trap_return();
 }
 
 #[no_mangle]
@@ -108,6 +181,8 @@ pub fn trap_return() -> ! {
         pcb_inner.status = ProcessStatus::Running;
         trap_context.epc = pcb_inner.entry_point;
         trap_context.sp = (PROC_U_STACK_ADDR + PROC_U_STACK_SIZE).0;
+
+        debug!("Initialized PCB with entry_point @ {:?}", pcb_inner.entry_point);
     }
     trap_context.kernel_sp = PROC_K_STACK_ADDR + PROC_K_STACK_SIZE;
     trap_context.user_trap = (user_trap as usize).into();
@@ -119,6 +194,7 @@ pub fn trap_return() -> ! {
     }
     let uservec_addr: VirtAddr = TRAMPOLINE_ADDR + ((uservec as usize) - (trampoline as usize));
     let userret_addr: VirtAddr = TRAMPOLINE_ADDR + ((userret as usize) - (trampoline as usize));
+    drop(pcb_inner);
     intr_off();
     unsafe {
         let userret_fp: extern "C" fn(VirtAddr) -> ! = core::mem::transmute(userret_addr.0 as *const ());

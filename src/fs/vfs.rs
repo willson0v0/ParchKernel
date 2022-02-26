@@ -1,9 +1,10 @@
 use core::fmt::{Debug, Formatter};
+
 use alloc::string::ToString;
 use alloc::{sync::Arc, string::String, vec::Vec};
 use alloc::collections::VecDeque;
 use bitflags::*;
-use super::{File, DirFile, RegularFile, LinkFile};
+use super::{File, LinkFile};
 use crate::mem::SegmentFlags;
 use crate::utils::ErrorNum;
 
@@ -46,6 +47,7 @@ pub trait VirtualFileSystem : Send + Sync + Debug {
     fn remove(&self, path: &Path) -> Result<(), ErrorNum>;
     fn link(&self, dest: Arc<dyn File>, link_file: &Path) -> Result<Arc<dyn File>, ErrorNum>;
     fn sym_link(&self, abs_src: &Path, rel_dst: &Path) -> Result<Arc<dyn LinkFile>, ErrorNum>;
+    fn mount_path(&self) -> Path;
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -146,6 +148,14 @@ impl Path {
     pub fn last(&self) -> String {
         if self.is_root() {panic!("is_root")}
         return self.components[self.len() - 1].clone();
+    }
+
+    pub fn concat(&self, rhs: &Path) -> Self {
+        let mut components = self.components.clone();
+        components.append(&mut rhs.components.clone());
+        Self {
+            components
+        }
     }
 }
 

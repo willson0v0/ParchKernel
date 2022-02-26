@@ -1,9 +1,9 @@
-use core::sync::atomic::{AtomicU64, Ordering};
+use core::sync::atomic::{Ordering, AtomicUsize};
 
 use alloc::{collections::VecDeque, sync::Arc};
 use lazy_static::*;
 
-use crate::utils::{SpinMutex, MutexGuard, Mutex, ErrorNum};
+use crate::utils::{SpinMutex, MutexGuard, Mutex};
 
 use super::ProcessControlBlock;
 
@@ -53,14 +53,16 @@ pub fn dequeue() -> Option<Arc<ProcessControlBlock>> {
     PROCESS_MANAGER.inner_locked().dequeue()
 }
 
-pub struct ProcessID(u64);
+#[derive(Debug, Clone, Copy)]
+pub struct ProcessID(pub usize);
 
 /// NEVER REUSE PID
-struct PIDAllocator(AtomicU64);
+struct PIDAllocator(AtomicUsize);
 
 impl PIDAllocator {
+    /// start from 1, for 0 is for shecduler kernel thread
     pub fn new() -> Self {
-        Self (AtomicU64::new(0))
+        Self (AtomicUsize::new(1))
     }
 
     pub fn next(&self) -> ProcessID {

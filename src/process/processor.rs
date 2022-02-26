@@ -10,10 +10,10 @@ use alloc::vec::Vec;
 use lazy_static::*;
 use crate::config::{MAX_CPUS, PROC_K_STACK_ADDR, PROC_K_STACK_SIZE};
 use crate::interrupt::trap_return;
-use crate::mem::{VirtAddr, PageGuard, alloc_vm_page, VirtPageNum, SCHEDULER_MEM_LAYOUT};
+use crate::mem::{SCHEDULER_MEM_LAYOUT};
 use crate::process::ProcessControlBlock;
 use crate::process::pcb::ProcessStatus;
-use crate::utils::{SpinMutex, Mutex, MutexGuard};
+use crate::utils::{Mutex};
 
 use super::{dequeue, enqueue};
 
@@ -144,8 +144,8 @@ impl Processor {
                 }
                 let proc_context = pcb_inner.context_ptr();
                 let idle_context = self.context_ptr();
-                let proc_satp = pcb_inner.mem_layout.pagetable.satp();
-                let scheuler_satp = SCHEDULER_MEM_LAYOUT.acquire().pagetable.satp();
+                let proc_satp = pcb_inner.mem_layout.pagetable.satp(Some(proc.pid));
+                let scheuler_satp = SCHEDULER_MEM_LAYOUT.acquire().pagetable.satp(None);
                 drop(pcb_inner);
                 self.inner.borrow_mut().pcb = Some(proc);
                 unsafe {
@@ -257,10 +257,12 @@ pub fn pop_intr_off() {
 
 pub fn intr_off() {
     unsafe {sstatus::clear_sie();}
+    assert!(!sstatus::read().sie(), "Cannot clear sie");
 }
 
 pub fn intr_on() {
     unsafe {sstatus::set_sie();}
+    assert!(sstatus::read().sie(), "Cannot set sie");
 }
 
 // TODO: Change this to RAII style (SUMGuard with new and Drop)

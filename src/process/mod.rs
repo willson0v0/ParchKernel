@@ -3,7 +3,8 @@ mod manager;
 mod processor;
 pub use pcb::{
     ProcessStatus,
-    ProcessControlBlock
+    ProcessControlBlock,
+    FileDescriptor
 };
 
 pub use manager::{

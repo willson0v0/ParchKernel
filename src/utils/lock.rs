@@ -122,7 +122,7 @@ impl<T> SleepMutex<T> {
 
 impl<T> Mutex<T> for SleepMutex<T> {
     fn acquire(&self) -> MutexGuard<'_, T> {
-        // TODO: Check if is a Kernel thread for Proc is acquiring SleepMutex. Scheduler kernel thread is not allowed to use this.
+        // TODO: Check if is Scheduler Kernel thread for Proc is acquiring SleepMutex. Scheduler kernel thread is not allowed to use this.
         while !self.is_acquired.swap(true, Ordering::AcqRel) {
             get_processor().suspend_switch();
         }

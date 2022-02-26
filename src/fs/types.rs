@@ -29,21 +29,21 @@ pub struct Dirent {
 
 bitflags! {
     pub struct Permission: u16 {
-        const OwnerR = 0400;
-        const OwnerW = 0200;
-        const OwnerX = 0100;
-        const GroupR = 0040;
-        const GroupW = 0020;
-        const GroupX = 0010;
-        const OtherR = 0004;
-        const OtherW = 0002;
-        const OtherX = 0001;
+        const OWNER_R = 0400;
+        const OWNER_W = 0200;
+        const OWNER_X = 0100;
+        const GROUP_R = 0040;
+        const GROUP_W = 0020;
+        const GROUP_X = 0010;
+        const OTHER_R = 0004;
+        const OTHER_W = 0002;
+        const OTHER_X = 0001;
     }
 }
 
 impl Permission {
     pub fn default() -> Self {
-        Self::OwnerR | Self::OwnerW | Self::GroupR | Self::OtherR
+        Self::OWNER_R | Self::OWNER_W | Self::GROUP_R | Self::OTHER_R
     }
 }
 

@@ -1,9 +1,10 @@
 use _core::mem::size_of;
 use alloc::vec::Vec;
 use bitflags::*;
+
 use core::fmt::{self, Debug, Formatter};
 
-use crate::{utils::LogLevel, config::PAGE_SIZE};
+use crate::{utils::LogLevel, config::PAGE_SIZE, process::ProcessID};
 
 use super::{PageGuard, PhysAddr, alloc_vm_page, types::{PhysPageNum, VirtPageNum}};
 
@@ -151,12 +152,16 @@ impl PageTable {
     }
 
     pub fn print(&self, log_level: LogLevel) {
-        log!(log_level, "Pagetable @ 0x{:x}", self.satp());
+        log!(log_level, "Pagetable @ {:?}", self.root_ppn);
         self.print_ptes(self.root_ppn, [0,0,0], 1, log_level);
     }
 
-    pub fn satp(&self) -> usize {
-        8usize << 60 | self.root_ppn.0
+    pub fn satp(&self, pid: Option<ProcessID>) -> usize {
+        if let Some(pid) = pid {
+            (8usize << 60 )| (pid.0 << 44) | (self.root_ppn.0)
+        } else {
+            (8usize << 60 ) | (self.root_ppn.0)
+        }
     }
 
     pub fn load(root_pageguard: PageGuard) -> Self {

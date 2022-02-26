@@ -1,11 +1,13 @@
 #![allow(dead_code)]
 
 
+use alloc::borrow::ToOwned;
 use alloc::collections::VecDeque;
+use alloc::vec::Vec;
 use crate::mem::PhysAddr;
 use crate::utils::{SpinMutex, Mutex};
 use core::option::Option;
-use crate::process::{ pop_intr_off, push_intr_off};
+use crate::process::{ pop_intr_off, push_intr_off, get_processor};
 use lazy_static::*;
 use crate::config::UART0_ADDR;
 
@@ -148,9 +150,22 @@ impl Uart {
     pub fn write(&self, data: &str) {
         let mut inner = self.inner.acquire();
         while inner.write_buffer.len() >= 1024 {
-            // TODO: drop yield lock
+            drop(inner);
+            get_processor().suspend_switch();
+            inner = self.inner.acquire();
         }
         inner.write(data);
+        inner.sync();
+    }
+
+    pub fn write_data(&self, data: &[u8]) {
+        let mut inner = self.inner.acquire();
+        while inner.write_buffer.len() >= 1024 {
+            drop(inner);
+            get_processor().suspend_switch();
+            inner = self.inner.acquire();
+        }
+        inner.write_bytes(data);
         inner.sync();
     }
 
@@ -246,9 +261,26 @@ impl Uart {
         let mut inner = self.inner.acquire();
         // waiting for irq
         while inner.read_buffer.len() == 0 {
-            // TODO: drop yield lock
+            drop(inner);
+            get_processor().suspend_switch();
+            inner = self.inner.acquire();
         }
         inner.read_buffer.pop_front().unwrap()
+    }
+
+    pub fn read_bytes(&self, length: usize) -> Vec<u8> {
+        let mut inner = self.inner.acquire();
+        let mut res = Vec::new();
+        while res.len() < length {
+            // waiting for irq
+            while inner.read_buffer.len() == 0 {
+                drop(inner);
+                get_processor().suspend_switch();
+                inner = self.inner.acquire();
+            }
+            res.push(inner.read_buffer.pop_front().unwrap());
+        }
+        res
     }
 
     pub fn read_byte_synced(&self) -> u8 {
@@ -267,9 +299,11 @@ impl Uart {
 
 impl UartInner {
     pub fn write(&mut self, data: &str) {
-        for b in data.as_bytes() {
-            self.write_buffer.push_back(*b);
-        }
+        self.write_buffer.append(&mut VecDeque::from_iter(data.as_bytes().to_owned()));
+    }
+
+    pub fn write_bytes(&mut self, data: &[u8]) {
+        self.write_buffer.append(&mut VecDeque::from_iter(data.to_owned()));
     }
     
     pub fn write_synced(&self, data: &str) {

@@ -15,7 +15,10 @@ pub struct ParchFSInner {
     inode_bitmap: BitMap
 }
 
-pub struct ParchFS(pub SpinMutex<ParchFSInner>);
+pub struct ParchFS{
+    pub inner: SpinMutex<ParchFSInner>,
+    pub mount_path: Path
+}
 
 impl Debug for ParchFS {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -24,8 +27,11 @@ impl Debug for ParchFS {
 }
 
 impl ParchFS {
-    pub fn new() -> Self {
-        Self(SpinMutex::new("PFS lock", ParchFSInner::new()))
+    pub fn new(mount_path: Path) -> Self {
+        Self{
+            inner: SpinMutex::new("PFS lock", ParchFSInner::new()),
+            mount_path,
+        }
     }
 
     pub fn inodeno_2_pa(inode_no: INodeNo) -> PhysAddr {
@@ -58,22 +64,22 @@ impl ParchFS {
     /// Calculate how much extra space it need
     /// !!! MUST NOT USE RAW instantiate_volatile(), for one INode correspond to multiple File and File Mutex is not enough
     pub fn get_inode(&self, inode_no: INodeNo) -> Result<Arc<SpinMutex<&'static mut PFSINode>>, ErrorNum> {
-        let mut inner = self.0.acquire();
+        let mut inner = self.inner.acquire();
         inner.get_inode(inode_no)
     }
 
     pub fn alloc_blk(&self) -> BlockNo {
-        let mut inner = self.0.acquire();
+        let mut inner = self.inner.acquire();
         inner.alloc_blk()
     }
 
     pub fn free_blk(&self, block_no: BlockNo) {
-        let mut inner = self.0.acquire();
+        let mut inner = self.inner.acquire();
         inner.free_blk(block_no);
     }
     
     pub fn make_file(&self, parent: Arc<dyn DirFile>, name: String, perm: Permission, f_type: FileType, open_mode: OpenMode) -> Result<Arc<dyn File>, ErrorNum> {
-        let mut inner = self.0.acquire();
+        let mut inner = self.inner.acquire();
         inner.make_file(parent, name, perm, f_type, open_mode)
     }
 
@@ -180,7 +186,7 @@ impl VirtualFileSystem for ParchFS {
         // Note: cannot use open "/" or root_dir() here
         let root_dir = Arc::new(
             PFSDir(SpinMutex::new("PFS ROOT", crate::fs::fs_impl::parch_fs::PFSDirInner { base: PFSBase {
-                inode_no: self.0.acquire().superblock.root_inode.into(),
+                inode_no: self.inner.acquire().superblock.root_inode.into(),
                 open_mode: OpenMode::SYS,
                 mmap_start: None,
                 fs: Arc::downgrade(&PARCH_FS),
@@ -190,7 +196,7 @@ impl VirtualFileSystem for ParchFS {
         root_dir.open_dir(path, mode)
     }
 
-    fn mkdir(&self, mut path: &crate::fs::Path) -> Result<(), crate::utils::ErrorNum> {
+    fn mkdir(&self, path: &crate::fs::Path) -> Result<(), crate::utils::ErrorNum> {
         if path.is_root() {return Err(ErrorNum::EEXIST);}
         self.create_path(path)?;
         Ok(())
@@ -214,6 +220,10 @@ impl VirtualFileSystem for ParchFS {
     }
 
     fn sym_link(&self, _abs_src: &crate::fs::Path, _rel_dst: &crate::fs::Path) -> Result<alloc::sync::Arc<dyn crate::fs::LinkFile>, crate::utils::ErrorNum> {
+        todo!()
+    }
+
+    fn mount_path(&self) -> Path {
         todo!()
     }
 }

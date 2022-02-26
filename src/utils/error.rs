@@ -1,6 +1,8 @@
 #![allow(dead_code)]
 
-#[repr(u64)]
+use core::ops::Neg;
+
+#[repr(usize)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ErrorNum {
     /// Operation not permitted
@@ -278,4 +280,10 @@ pub enum ErrorNum {
     ENOSEG          = 1006,
     /// Already mmaped
     EMMAPED         = 1007,
+}
+
+impl ErrorNum {
+    pub fn to_ret(&self) -> usize {
+        (*self as isize).neg() as usize
+    }
 }

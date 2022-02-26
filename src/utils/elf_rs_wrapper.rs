@@ -1,6 +1,6 @@
 use elf_rs::*;
 use elf_rs::Elf;
-use elf_rs::ElfFile;
+
 
 use super::ErrorNum;
 

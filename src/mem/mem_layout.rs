@@ -2,13 +2,13 @@ use core::{arch::asm};
 
 use alloc::{vec::Vec, sync::Arc};
 use riscv::register::{satp};
-use crate::{utils::{SpinMutex, ErrorNum}, config::{PHYS_END_ADDR, MMIO_RANGES, TRAP_CONTEXT_ADDR, PAGE_SIZE, PROC_K_STACK_ADDR}, mem::{TrampolineSegment, UTrampolineSegment, TrapContextSegment, IdenticalMappingSegment, segment::SegmentFlags, VirtAddr, types::VPNRange, ManagedSegment}, fs::RegularFile, process::{push_sum_on, pop_sum_on}};
+use crate::{utils::{SpinMutex, ErrorNum}, config::{PHYS_END_ADDR, MMIO_RANGES, PAGE_SIZE, PROC_K_STACK_ADDR}, mem::{TrampolineSegment, UTrampolineSegment, TrapContextSegment, IdenticalMappingSegment, segment::SegmentFlags, VirtAddr, types::VPNRange, ManagedSegment}, fs::RegularFile, process::{push_sum_on, pop_sum_on, get_processor}};
 use lazy_static::*;
 use super::{PageTable, Segment, VirtPageNum, ProcKStackSegment, segment::ProcUStackSegment};
 
 use crate::utils::elf_rs_wrapper::read_elf;
 use elf_rs::*;
-use elf_rs::Elf;
+
 use elf_rs::ElfFile;
 
 
@@ -148,8 +148,8 @@ impl MemLayout {
     }
 
     pub fn activate(&self) {
-        debug!("Activating pagetable @ 0x{:x}", self.pagetable.satp());
-        let satp = self.pagetable.satp();
+        let satp = self.pagetable.satp(get_processor().current().and_then(|pcb| Some(pcb.pid)));
+        debug!("Activating pagetable @ 0x{:x}", satp);
         unsafe {
             satp::write(satp);
             asm!("sfence.vma");

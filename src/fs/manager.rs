@@ -1,7 +1,7 @@
-use alloc::collections::BTreeMap;
+use alloc::{collections::BTreeMap};
 use alloc::sync::Arc;
 use crate::utils::{SpinMutex, ErrorNum};
-use super::{Path, VirtualFileSystem, File, vfs::OpenMode, DirFile, RegularFile, LinkFile};
+use super::{Path, VirtualFileSystem, File, vfs::OpenMode, LinkFile};
 
 pub struct MountManager{
     // TODO: Change this to R/W lock
@@ -9,9 +9,9 @@ pub struct MountManager{
 }
 
 impl MountManager {
-    pub fn new(root_fs: Arc<dyn VirtualFileSystem>) -> Self {
+    pub fn new() -> Self {
         Self {
-            inner: SpinMutex::new("MountManager", MountManagerInner::new(root_fs))
+            inner: SpinMutex::new("MountManager", MountManagerInner::new())
         }
     }
 }
@@ -21,12 +21,10 @@ pub struct MountManagerInner {
 }
 
 impl MountManagerInner {
-    pub fn new(root_fs: Arc<dyn VirtualFileSystem>) -> Self {
-        let mut res = Self {
+    pub fn new() -> Self {
+        Self {
             fs: BTreeMap::new()
-        };
-        res.mount("/".into(), root_fs).unwrap();
-        res
+        }
     }
 
     pub fn mount(&mut self, path: Path, vfs: Arc<dyn VirtualFileSystem>) -> Result<(), ErrorNum> {

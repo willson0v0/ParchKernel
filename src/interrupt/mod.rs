@@ -7,4 +7,4 @@ pub use plic::PLIC0;
 
 pub use clint::CLINT;
 
-pub use trap_handler::trap_return;
+pub use trap_handler::{trap_return, set_kernel_trap_entry};
