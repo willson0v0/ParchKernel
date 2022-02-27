@@ -133,6 +133,7 @@ extern "C" fn genesis_s() {
         process::intr_on();
         mem::init();
         mem::hart_init();
+        info!("Current vm mem usage: {:?}", mem::stat_mem());
         
         println!("\r\n\n\n\nParch OS\n");
         println!("Ver\t: {}", version::VERSION);

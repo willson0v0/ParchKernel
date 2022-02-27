@@ -2,7 +2,7 @@ use core::{arch::asm};
 
 use alloc::{vec::Vec, sync::Arc};
 use riscv::register::{satp};
-use crate::{utils::{SpinMutex, ErrorNum}, config::{PHYS_END_ADDR, MMIO_RANGES, PAGE_SIZE, PROC_K_STACK_ADDR, TRAMPOLINE_ADDR, U_TRAMPOLINE_ADDR, TRAP_CONTEXT_ADDR, PROC_U_STACK_ADDR}, mem::{TrampolineSegment, UTrampolineSegment, TrapContextSegment, IdenticalMappingSegment, segment::SegmentFlags, VirtAddr, types::VPNRange, ManagedSegment}, fs::RegularFile, process::{get_processor}};
+use crate::{utils::{SpinMutex, ErrorNum, Mutex}, config::{PHYS_END_ADDR, MMIO_RANGES, PAGE_SIZE, PROC_K_STACK_ADDR, TRAMPOLINE_ADDR, U_TRAMPOLINE_ADDR, TRAP_CONTEXT_ADDR, PROC_U_STACK_ADDR}, mem::{TrampolineSegment, UTrampolineSegment, TrapContextSegment, IdenticalMappingSegment, segment::SegmentFlags, VirtAddr, types::VPNRange, ManagedSegment, stat_mem}, fs::RegularFile, process::{get_processor}};
 use lazy_static::*;
 use super::{PageTable, Segment, VirtPageNum, ProcKStackSegment, segment::ProcUStackSegment};
 
@@ -122,7 +122,7 @@ impl MemLayout {
         // XXX: do_map here, or later?
         verbose!("Mapping all segment into pagetable...");
         layout.do_map();
-
+        debug!("Current vm mem usage: {:?}", stat_mem());
         layout
     }
 
@@ -187,6 +187,7 @@ impl MemLayout {
     }
 
     pub fn activate(&self) {
+        info!("This Pagetable uses {} page", self.pagetable.pages.len());
         let satp = self.pagetable.satp(get_processor().current().and_then(|pcb| Some(pcb.pid)));
         debug!("Activating pagetable @ 0x{:x}", satp);
         unsafe {

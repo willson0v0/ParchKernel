@@ -121,8 +121,8 @@ impl PageTableEntry {
 }
 
 pub struct PageTable {
-    root_ppn: PhysPageNum,
-    pages: Vec<PageGuard>
+    pub root_ppn: PhysPageNum,
+    pub pages: Vec<PageGuard>
 }
 
 impl PageTable {

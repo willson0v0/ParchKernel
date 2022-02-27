@@ -131,13 +131,14 @@ pub fn sys_dup(fd: FileDescriptor) -> Result<usize, ErrorNum> {
 
 pub fn sys_fork() -> Result<usize, ErrorNum> {
     let proc = get_processor().current().unwrap();
-    let mut pcb_inner = proc.get_inner();
     let child = proc.fork()?;
-    child.get_inner().parent = Some(Arc::downgrade(&proc));
+    let mut pcb_inner = proc.get_inner();
+    let mut child_inner = child.get_inner();
+    child_inner.parent = Some(Arc::downgrade(&proc));
     pcb_inner.children.insert(child.clone());
     let pid = child.pid.0;
-    child.get_inner().trap_context().a0 = 0;
-    enqueue(child);
+    child_inner.trap_context().a0 = 0;
+    enqueue(child.clone());
     Ok(pid)
 }
 

@@ -31,6 +31,7 @@ trait PageAllocator {
 	fn alloc(&mut self, is_exec: bool) -> Option<PhysPageNum>;
 	fn free(&mut self, to_free: PhysPageNum, is_exec: bool);
 	fn claim(&mut self, to_claim: PhysPageNum, is_exec: bool);
+	fn stat(&self) -> (usize, usize);
 }
 
 pub type PageGuard = Arc<PageGuardInner>;
@@ -138,6 +139,10 @@ impl PageAllocator for BitMapPageAllocator {
     fn claim(&mut self, to_claim: PhysPageNum, is_exec: bool) {
         self.mark_unavailable(to_claim, is_exec);
     }
+
+	fn stat(&self) -> (usize, usize) {
+		(self.bitmap_fs.count(), self.bitmap_mm.count())
+	}
 }
 
 pub fn alloc_vm_page() -> PageGuard {
@@ -169,4 +174,8 @@ pub fn claim_vm_page(to_claim: PhysPageNum) -> PageGuard {
 pub fn claim_fs_page(to_claim: PhysPageNum) -> PageGuard {
 	PAGE_ALLOCATOR.acquire().claim(to_claim, false);
 	PageGuard::new(PageGuardInner::new(to_claim, false, false))
+}
+
+pub fn stat_mem() -> (usize, usize) {
+	PAGE_ALLOCATOR.acquire().stat()
 }

@@ -32,6 +32,7 @@ pub use page_allocator::{
     free_fs_page,
     claim_vm_page,
     claim_fs_page,
+    stat_mem,
     PageGuard
 };
 

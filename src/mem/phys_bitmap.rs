@@ -2,7 +2,7 @@
 
 use core::cell::RefCell;
 
-use alloc::{vec::Vec};
+use alloc::{vec::Vec, boxed::Box};
 
 
 use super::PhysAddr;
@@ -17,6 +17,11 @@ extern "C" {
 //         SpinMutex::new("InodeBitmap", BitMap::new((INODE_BITMAP_ADDRESS as usize).into(), INODE_BITMAP_ADDRESS as usize - PAGE_BITMAP_MM_ADDRESS as usize));
 // }
 
+pub trait BitMapTrait {
+    fn get(&self) -> bool;
+    // fn set(&self)
+}
+
 pub struct BitMapIndex {
     bits: u64,
     level: usize,
@@ -26,6 +31,7 @@ pub struct BitMapIndex {
 
 impl BitMapIndex {
     pub fn new(length: usize) -> Self {
+        let length = length / 64;
         let mut level = None;
         for i in 0..10 {
             if Self::powof64(i + 1) >= length {
@@ -163,7 +169,7 @@ pub struct BitMap {
 impl BitMap {
     /// total_length in bits
     pub fn new(start_addr: PhysAddr, length: usize) -> Self {
-        let mut bi = BitMapIndex::new(length/64);
+        let mut bi = BitMapIndex::new(length);
 
         for i in 0..(length/64) {
             bi.set_val(i, unsafe{(start_addr+i).read_volatile::<u64>() == 0xFFFF_FFFF_FFFF_FFFF});
