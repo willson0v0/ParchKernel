@@ -435,7 +435,7 @@ impl DirFile for PFSDir {
         if mode.contains(OpenMode::CREATE) && rel_path.len() == 1 {
             // default to create regular file
             drop(inner);
-            self.make_file(rel_path.components[0].clone(), Permission::default(), FileType::REGULAR);
+            self.make_file(rel_path.components[0].clone(), Permission::default(), FileType::REGULAR)?;
             self.open_dir(&rel_path.components[0].clone().into(), mode)
         } else {
             Err(ErrorNum::ENOENT)
@@ -505,7 +505,7 @@ impl DirFile for PFSDir {
                 if inode.hard_link_count == 0 {
                     fs_inner.free_inode(e.inode.into());
                 }
-                inner.write_dirent_at(PFSDEntry::empty(), idx);
+                inner.write_dirent_at(PFSDEntry::empty(), idx)?;
                 return Ok(());
             }
         }

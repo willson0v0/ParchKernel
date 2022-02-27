@@ -36,7 +36,7 @@
 .align 4
 kernel_vec:
 	// make room to save registers.
-	addi sp, sp, -256
+	addi sp, sp, -512
 
 	// save the registers.
 	sd ra, 0(sp)
@@ -70,6 +70,38 @@ kernel_vec:
 	sd t4, 224(sp)
 	sd t5, 232(sp)
 	sd t6, 240(sp)
+	fsd ft0 , 248(sp)
+	fsd ft1 , 256(sp)
+	fsd ft2 , 264(sp)
+	fsd ft3 , 272(sp)
+	fsd ft4 , 280(sp)
+	fsd ft5 , 288(sp)
+	fsd ft6 , 296(sp)
+	fsd ft7 , 304(sp)
+	fsd fs0 , 312(sp)
+	fsd fs1 , 320(sp)
+	fsd fa0 , 328(sp)
+	fsd fa1 , 336(sp)
+	fsd fa2 , 344(sp)
+	fsd fa3 , 352(sp)
+	fsd fa4 , 360(sp)
+	fsd fa5 , 368(sp)
+	fsd fa6 , 376(sp)
+	fsd fa7 , 384(sp)
+	fsd fs2 , 392(sp)
+	fsd fs3 , 400(sp)
+	fsd fs4 , 408(sp)
+	fsd fs5 , 416(sp)
+	fsd fs6 , 424(sp)
+	fsd fs7 , 432(sp)
+	fsd fs8 , 440(sp)
+	fsd fs9 , 448(sp)
+	fsd fs10, 456(sp)
+	fsd fs11, 464(sp)
+	fsd ft8 , 472(sp)
+	fsd ft9 , 480(sp)
+	fsd ft10, 488(sp)
+	fsd ft11, 496(sp)
 
 // call the rust trap handler in trap_handler.asm
 	call kernel_trap
@@ -107,7 +139,40 @@ kernel_vec:
 	ld t5, 232(sp)
 	ld t6, 240(sp)
 
-	addi sp, sp, 256
+	fld ft0 , 248(sp)
+	fld ft1 , 256(sp)
+	fld ft2 , 264(sp)
+	fld ft3 , 272(sp)
+	fld ft4 , 280(sp)
+	fld ft5 , 288(sp)
+	fld ft6 , 296(sp)
+	fld ft7 , 304(sp)
+	fld fs0 , 312(sp)
+	fld fs1 , 320(sp)
+	fld fa0 , 328(sp)
+	fld fa1 , 336(sp)
+	fld fa2 , 344(sp)
+	fld fa3 , 352(sp)
+	fld fa4 , 360(sp)
+	fld fa5 , 368(sp)
+	fld fa6 , 376(sp)
+	fld fa7 , 384(sp)
+	fld fs2 , 392(sp)
+	fld fs3 , 400(sp)
+	fld fs4 , 408(sp)
+	fld fs5 , 416(sp)
+	fld fs6 , 424(sp)
+	fld fs7 , 432(sp)
+	fld fs8 , 440(sp)
+	fld fs9 , 448(sp)
+	fld fs10, 456(sp)
+	fld fs11, 464(sp)
+	fld ft8 , 472(sp)
+	fld ft9 , 480(sp)
+	fld ft10, 488(sp)
+	fld ft11, 496(sp)
+
+	addi sp, sp, 512
 
 	// return to whatever we were doing in the kernel.
 	sret

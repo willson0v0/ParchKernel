@@ -53,7 +53,7 @@ pub use pagetable::{
     PTEFlags
 };
 
-use crate::utils::Mutex;
+use crate::utils::{Mutex};
 
 pub fn init() {
     init_kernel_heap();

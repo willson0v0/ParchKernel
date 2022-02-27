@@ -1,17 +1,24 @@
 mod pcb;
 mod manager;
 mod processor;
+use alloc::sync::Arc;
 pub use pcb::{
     ProcessStatus,
     ProcessControlBlock,
     FileDescriptor
 };
+pub mod def_handler;
+mod signal_num;
+
+pub use signal_num::SignalNum;
 
 pub use manager::{
     enqueue,
     dequeue,
     ProcessID,
-    new_pid
+    new_pid,
+    get_process,
+    free_current
 };
 
 pub use processor::{
@@ -25,8 +32,13 @@ pub use processor::{
     get_hart_id
 };
 
+use lazy_static::*;
+lazy_static!{
+    pub static ref INIT_PROCESS: Arc<ProcessControlBlock> = ProcessControlBlock::new(crate::config::INIT_PROCESS_PATH.into()).unwrap();
+}
+
 pub fn init() {
-    enqueue(ProcessControlBlock::new(crate::config::INIT_PROCESS.into()).unwrap());
+    enqueue(INIT_PROCESS.clone());
 }
 
 pub fn hart_init() {

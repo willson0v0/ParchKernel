@@ -163,7 +163,7 @@ pub struct BitMap {
 impl BitMap {
     /// total_length in bits
     pub fn new(start_addr: PhysAddr, length: usize) -> Self {
-        let mut bi = BitMapIndex::new(length);
+        let mut bi = BitMapIndex::new(length/64);
 
         for i in 0..(length/64) {
             bi.set_val(i, unsafe{(start_addr+i).read_volatile::<u64>() == 0xFFFF_FFFF_FFFF_FFFF});
@@ -177,12 +177,18 @@ impl BitMap {
     }
 
     fn raw_get(&self, pos: usize) -> bool {
+        if cfg!(debug_assertions) {
+            assert!(pos < self.length, "Bitmap oor");
+        }
         let arr_index = pos / 64;
         let arr_offset = pos % 64;
         self.raw_get_bits(arr_index) & (1<<arr_offset) != 0
     }
 
     fn raw_set(&self, pos: usize) {
+        if cfg!(debug_assertions) {
+            assert!(pos < self.length, "Bitmap oor");
+        }
         let arr_index = pos / 64;
         let arr_offset = pos % 64;
         let original_bits = self.raw_get_bits(arr_index);
@@ -190,6 +196,9 @@ impl BitMap {
     }
 
     fn raw_clear(&self, pos: usize) {
+        if cfg!(debug_assertions) {
+            assert!(pos < self.length, "Bitmap oor");
+        }
         let arr_index = pos / 64;
         let arr_offset = pos % 64;
         let original_bits = self.raw_get_bits(arr_index);
@@ -198,6 +207,9 @@ impl BitMap {
 
     /// arr_index for u64
     fn raw_get_bits(&self, arr_index: usize) -> u64 {
+        if cfg!(debug_assertions) {
+            assert!(arr_index < self.length / 64, "Bitmap oor");
+        }
         unsafe {(self.start_addr + arr_index).read_volatile()}
     }
 
@@ -247,5 +259,14 @@ impl BitMap {
         for i in 0..self.length {
             self.clear(i);
         }
+    }
+
+    /// Slow method, only use in profiling!
+    pub fn count(&self) -> usize {
+        let mut res = 0;
+        for i in 0..(self.length/64) {
+            res += self.raw_get_bits(i).count_ones() as usize;
+        }
+        res
     }
 }

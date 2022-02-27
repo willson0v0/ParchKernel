@@ -38,6 +38,6 @@ pub fn open(path: &Path, mode: OpenMode) -> Result<alloc::sync::Arc<dyn File>, c
 
 pub fn init() {
     let mut inner = MOUNT_MANAGER.inner.acquire();
-    inner.mount("/".into(), fs_impl::PARCH_FS.clone());
-    inner.mount("/dev".into(), fs_impl::DEV_FS.clone());
+    inner.mount("/".into(), fs_impl::PARCH_FS.clone()).expect("Failed to mount root fs");
+    inner.mount("/dev".into(), fs_impl::DEV_FS.clone()).expect("Failed to mount dev fs");
 }

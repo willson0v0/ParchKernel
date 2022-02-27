@@ -6,6 +6,7 @@
 #![feature(step_trait)]
 #![feature(is_some_with)]
 #![allow(dead_code)]
+#![deny(unused_must_use)]
 
 // lock sequence
 // 
@@ -41,11 +42,11 @@ global_asm!(include_str!("interrupt/u_trampoline.asm"));
 
 use riscv::register::{medeleg, mepc, mhartid, mideleg, mie, mscratch, mstatus, mtvec, pmpaddr0, pmpcfg0, satp, sie};
 
-
-
-
-
 static mut MSCRATCH_ARR: [[usize; 6]; config::MAX_CPUS] = [[0; 6]; config::MAX_CPUS];
+
+
+
+pub const HART_REGISTER: &[bool; config::MAX_CPUS] = &[false; config::MAX_CPUS];
 
 #[no_mangle]
 extern "C" fn genesis_m() -> ! {
@@ -60,6 +61,8 @@ extern "C" fn genesis_m() -> ! {
         mstatus::set_mpp(mstatus::MPP::Supervisor);
         // set mepc
         mepc::write(genesis_s as usize);
+        // enable fpu
+        mstatus::set_fs(mstatus::FS::Initial);
         // diable paging
         satp::set(satp::Mode::Bare, 0, 0);
         // set deleg to s mode
@@ -94,6 +97,9 @@ extern "C" fn genesis_m() -> ! {
         pmpaddr0::write(0x3fffffffffffffusize);
         pmpcfg0::write(0xfusize);
         let hart_id = mhartid::read();
+        let ptr = HART_REGISTER as *const bool as *mut bool;
+        let mut_slice = core::slice::from_raw_parts_mut(ptr, config::MAX_CPUS);
+        mut_slice[hart_id] = true;
         // set timer interrupt and set up mscratch
         // mscratch for the cpu will store registers used in timervec
         // scratch[0,1,2] : register save area.
@@ -140,7 +146,8 @@ extern "C" fn genesis_s() {
         while !hart0_fin {}
         mem::hart_init();
     }
-    
+    assert!(hart0_fin, "???");
+
     process::hart_init();
     
     loop{

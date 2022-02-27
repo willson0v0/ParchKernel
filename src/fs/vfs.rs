@@ -10,7 +10,7 @@ use crate::utils::ErrorNum;
 
 bitflags! {
     /// fs flags
-    pub struct OpenMode: u64 {
+    pub struct OpenMode: usize {
         const READ      = 1 << 0;
         const WRITE     = 1 << 1;
         const CREATE    = 1 << 2;

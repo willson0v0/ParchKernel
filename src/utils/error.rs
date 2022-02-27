@@ -280,6 +280,10 @@ pub enum ErrorNum {
     ENOSEG          = 1006,
     /// Already mmaped
     EMMAPED         = 1007,
+    /// sigreturn not in signal
+    ENOSIG          = 1008,
+    /// signal was diabled by target
+    ESIGDISABLED    = 1009,
 }
 
 impl ErrorNum {

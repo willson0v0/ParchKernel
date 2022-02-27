@@ -2,7 +2,7 @@ use core::{arch::asm};
 
 use alloc::{vec::Vec, sync::Arc};
 use riscv::register::{satp};
-use crate::{utils::{SpinMutex, ErrorNum}, config::{PHYS_END_ADDR, MMIO_RANGES, PAGE_SIZE, PROC_K_STACK_ADDR}, mem::{TrampolineSegment, UTrampolineSegment, TrapContextSegment, IdenticalMappingSegment, segment::SegmentFlags, VirtAddr, types::VPNRange, ManagedSegment}, fs::RegularFile, process::{push_sum_on, pop_sum_on, get_processor}};
+use crate::{utils::{SpinMutex, ErrorNum}, config::{PHYS_END_ADDR, MMIO_RANGES, PAGE_SIZE, PROC_K_STACK_ADDR, TRAMPOLINE_ADDR, U_TRAMPOLINE_ADDR, TRAP_CONTEXT_ADDR, PROC_U_STACK_ADDR}, mem::{TrampolineSegment, UTrampolineSegment, TrapContextSegment, IdenticalMappingSegment, segment::SegmentFlags, VirtAddr, types::VPNRange, ManagedSegment}, fs::RegularFile, process::{get_processor}};
 use lazy_static::*;
 use super::{PageTable, Segment, VirtPageNum, ProcKStackSegment, segment::ProcUStackSegment};
 
@@ -126,7 +126,46 @@ impl MemLayout {
         layout
     }
 
-    pub fn register_segment(&mut self, seg: Arc<dyn Segment + Send>) {
+    pub fn reset(&mut self) -> Result<(), ErrorNum> {
+        extern "C" {
+            fn stext();
+            fn srodata();
+            fn sdata();
+            fn sbss_with_stack();
+            fn ekernel();
+        }
+        let mut basic = Vec::new();
+        basic.push(TRAMPOLINE_ADDR  );
+        basic.push(U_TRAMPOLINE_ADDR);
+        basic.push(TRAP_CONTEXT_ADDR);
+        basic.push(PROC_K_STACK_ADDR);
+        basic.push(PROC_U_STACK_ADDR);
+        basic.push(VirtAddr::from(stext as usize).into());
+        basic.push(VirtAddr::from(srodata as usize).into());
+        basic.push(VirtAddr::from(sdata as usize).into());
+        basic.push(VirtAddr::from(sbss_with_stack as usize).into());
+        basic.push(VirtAddr::from(ekernel as usize).into());
+
+        for (start, _) in MMIO_RANGES {
+            basic.push(VirtAddr::from(*start).into());
+        }
+
+        let basic = basic.into_iter().map(|va| VirtPageNum::from(va)).collect::<Vec<VirtPageNum>>();
+
+        let mut to_clear = Vec::new();
+        for seg in self.segments.iter() {
+            let start_vpn = seg.start_vpn();
+            if !basic.contains(&start_vpn) {
+                to_clear.push(start_vpn);
+            }
+        }
+        for vpn in to_clear {
+            self.remove_segment(vpn)?;
+        }
+        Ok(())
+    }
+
+    pub fn register_segment(&mut self, seg: Arc<dyn Segment>) {
         self.segments.push(seg);
     }
 
@@ -198,7 +237,7 @@ impl MemLayout {
 
     pub fn unmap_segment(&mut self, start_vpn: VirtPageNum) -> Result<(), ErrorNum> {
         let seg = self.get_segment(start_vpn)?;
-        seg.do_unmap(&mut self.pagetable);
+        seg.do_unmap(&mut self.pagetable)?;
         Ok(())
     }
 
@@ -246,21 +285,33 @@ impl MemLayout {
                 if p.flags().contains(ProgramHeaderFlags::WRITE) {
                     seg_flag = seg_flag | SegmentFlags::W;
                 }
-                let segment = ManagedSegment::new(VPNRange::new(seg_start, seg_end + 1), seg_flag);
-                self.register_segment(segment);
+                let segment = ManagedSegment::new(VPNRange::new(seg_start, seg_end + 1), SegmentFlags::W | SegmentFlags::R);
+                self.register_segment(segment.clone());
                 self.do_map();
                 // copy data into it
-                push_sum_on();
                 let src = unsafe{ buffer.as_ptr().add(p.offset() as usize)};
                 let dst = VirtAddr::from(seg_start).0 as *mut u8;
                 let len = p.filesz() as usize;
                 unsafe{core::ptr::copy_nonoverlapping(src, dst, len)}
-                pop_sum_on();
+                segment.alter_permission(seg_flag, &mut self.pagetable);
             }
         }
         let entry_point = elf.entry_point() as usize;
         // free the first mmap...
         self.remove_segment(first_map)?;
         Ok(entry_point.into())
+    }
+
+    pub fn fork(&self) -> Result<Self, ErrorNum> {
+        let mut layout = Self {
+            pagetable: PageTable::new(),
+            segments: Vec::new()
+        };
+
+        for seg in self.segments.iter() {
+            layout.register_segment(seg.clone_seg()?);
+        }
+        layout.do_map();
+        Ok(layout)
     }
 }

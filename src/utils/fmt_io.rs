@@ -3,7 +3,7 @@
 
 use alloc::string::String;
 
-use crate::process::{push_intr_off, pop_intr_off};
+use crate::{process::{push_intr_off, pop_intr_off}, utils::time::{get_time, get_time_ms, get_time_second}};
 
 use super::UART0;
 use core::fmt::{self, Write};
@@ -137,6 +137,7 @@ static LOG_TITLE: &'static [&str] = &[
 
 pub fn do_log(log_level: LogLevel, args: fmt::Arguments) {
     print!("\x1b[{};{}m{}", LOG_FG_COLOURS[log_level.to_num()], LOG_BG_COLOURS[log_level.to_num()], LOG_TITLE[log_level.to_num()]);
+    print!("[{:<4.5}]\t", get_time_second());
     print(args);
     println!("\x1b[{};{}m", FG_DEFAULT, BG_DEFAULT)
 }

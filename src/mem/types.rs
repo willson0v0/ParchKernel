@@ -1,13 +1,16 @@
 
 use core::fmt::{self, Debug, Formatter};
+use core::mem::size_of;
 use core::slice::from_raw_parts_mut;
 use core::{ops};
 use core::ptr::{read_volatile, write_volatile, copy_nonoverlapping};
 
 
+use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::config::{PAGE_OFFSET, PAGE_SIZE};
+use crate::utils::ErrorNum;
 use crate::utils::range::{StepUp, StepDown, Range};
 
 #[repr(C)]
@@ -171,6 +174,31 @@ impl VirtAddr {
     /// This WILL copy the data (to_vec did it)
     pub unsafe fn read_data(&self, length: usize) -> Vec<u8> {
         from_raw_parts_mut(self.0 as *mut u8, length).to_vec()
+    }
+
+    pub fn read_cstr(&self) -> Result<(String, usize), ErrorNum> {
+        let bytes = self.read_cstr_raw(1024);
+        let len = bytes.len();
+        if let Ok(s) = String::from_utf8(bytes) {
+            Ok((s, len))
+        } else {
+            Err(ErrorNum::ENOENT)
+        }
+    }
+
+    pub fn read_cstr_raw(&self, size_limit: usize) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        let mut va = self.clone();
+        loop {
+            let b: u8 = unsafe{va.read_volatile()};
+            if b == 0 || bytes.len() >= (size_limit - 1) {
+                break;
+            }
+            bytes.push(b);
+            va = va + size_of::<u8>();
+        }
+        bytes.push(0);
+        bytes
     }
 
     pub fn to_vpn_ceil(&self) -> VirtPageNum {

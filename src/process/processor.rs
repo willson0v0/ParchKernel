@@ -15,7 +15,7 @@ use crate::process::ProcessControlBlock;
 use crate::process::pcb::ProcessStatus;
 use crate::utils::{Mutex};
 
-use super::{dequeue, enqueue};
+use super::{dequeue, enqueue, INIT_PROCESS};
 
 global_asm!(include_str!("swtch.asm"));
 
@@ -30,10 +30,12 @@ extern "C" {
 /// The process context used in `__switch` (kernel execution flow) 
 /// Saved on top of the kernel stack of corresponding process.
 #[repr(C)]
+#[derive(Clone, Copy)]
 pub struct ProcessContext {
     ra      : usize,
     sp      : usize,
     s_regs  : [usize; 12],
+    s_fregs : [f64; 12]
 }
 
 impl ProcessContext {
@@ -41,7 +43,8 @@ impl ProcessContext {
         Self {
             ra: trap_return as usize,
             sp: PROC_K_STACK_ADDR.0 + PROC_K_STACK_SIZE,    // Stack top
-            s_regs: [0; 12]
+            s_regs: [0; 12],
+            s_fregs:[0.0; 12]
         }
     }
 }
@@ -171,6 +174,32 @@ impl Processor {
         enqueue(process);
         unsafe {
             __swtch(proc_context, idle_context);
+        }
+    }
+
+    pub fn exit_switch(&self, exit_code: isize) {
+        {
+            let proc = self.take_current().unwrap();
+            let mut pcb_inner = proc.get_inner();
+            pcb_inner.status = ProcessStatus::Zombie;
+            pcb_inner.exit_code = Some(exit_code);
+    
+            // let init proc to take all child process
+            {
+                let mut init_inner = INIT_PROCESS.get_inner();
+                for child in &pcb_inner.children {
+                    child.get_inner().parent = Some(Arc::downgrade(&INIT_PROCESS));
+                    init_inner.children.insert(child.clone());
+                }
+            }
+            
+            pcb_inner.children.clear();
+        }
+        let mut proc_ctx = ProcessContext::new();
+        let proc_ctx_ptr = &mut proc_ctx as *mut ProcessContext;
+        let idle_context = self.context_ptr();
+        unsafe {
+            __swtch(proc_ctx_ptr, idle_context);
         }
     }
 }

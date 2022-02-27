@@ -1,5 +1,6 @@
 use core::{panic, arch::asm};
 
+use alloc::borrow::ToOwned;
 use riscv::register::{scause::{   // s cause register
         self,
         Trap,
@@ -8,7 +9,7 @@ use riscv::register::{scause::{   // s cause register
     }, sepc, sip, sstatus::{self, SPP}, stval, stvec};
 
 use super::PLIC0;
-use crate::{config::{UART0_IRQ, TRAMPOLINE_ADDR, PROC_K_STACK_ADDR, PROC_K_STACK_SIZE, TRAP_CONTEXT_ADDR, PROC_U_STACK_ADDR, PROC_U_STACK_SIZE}, process::{get_processor, ProcessStatus, intr_off, get_hart_id, intr_on}, mem::VirtAddr, interrupt::trap_context::TrapContext, syscall::syscall};
+use crate::{config::{UART0_IRQ, TRAMPOLINE_ADDR, PROC_K_STACK_ADDR, PROC_K_STACK_SIZE, TRAP_CONTEXT_ADDR, PROC_U_STACK_ADDR, PROC_U_STACK_SIZE, U_TRAMPOLINE_ADDR}, process::{get_processor, ProcessStatus, intr_off, get_hart_id, intr_on, def_handler::def_ignore}, mem::VirtAddr, interrupt::trap_context::TrapContext, syscall::syscall};
 use crate::utils::UART0;
 
 /// Set trap entry to kernel trap handling function.
@@ -99,7 +100,7 @@ pub fn user_trap() -> ! {
     let stval = stval::read();
     let sstatus = sstatus::read();
     let sepc = sepc::read();
-    let trap_context = TrapContext::get_ref();
+    let trap_context = TrapContext::current_ref();
     trap_context.epc = sepc.into();
 
     assert!(sstatus.spp() == SPP::User, "user_trap not from user mode");
@@ -175,10 +176,12 @@ pub fn user_trap() -> ! {
 pub fn trap_return() -> ! {
     let pcb = get_processor().current().unwrap();
     let mut pcb_inner = pcb.get_inner();
-    let mut trap_context = TrapContext::get_ref();
+    let trap_context = TrapContext::current_ref();
     if pcb_inner.status == ProcessStatus::Initialized {
-        pcb_inner.entry_point = pcb_inner.mem_layout.map_elf(pcb.elf_file.clone()).unwrap();
+        let elf_file = pcb_inner.elf_file.clone();
+        pcb_inner.entry_point = pcb_inner.mem_layout.map_elf(elf_file).unwrap();
         pcb_inner.status = ProcessStatus::Running;
+        *trap_context = TrapContext::new();
         trap_context.epc = pcb_inner.entry_point;
         trap_context.sp = (PROC_U_STACK_ADDR + PROC_U_STACK_SIZE).0;
 
@@ -194,6 +197,21 @@ pub fn trap_return() -> ! {
     }
     let uservec_addr: VirtAddr = TRAMPOLINE_ADDR + ((uservec as usize) - (trampoline as usize));
     let userret_addr: VirtAddr = TRAMPOLINE_ADDR + ((userret as usize) - (trampoline as usize));
+
+    // Process pending signal
+    // current TrapContext will be archieved
+    // new TrapContext will have epc = SignalHandlerVA, ra = __user_restore_from_handler in UTrampoline
+    if pcb_inner.pending_signal.len() > 0 {
+        let signal = pcb_inner.pending_signal.pop_front().unwrap();
+        debug!("Processing signal {:?} for process {:?}", signal, pcb.pid);
+        pcb_inner.signal_contexts.push(trap_context.clone());
+        
+        extern "C" {fn sutrampoline(); }
+        let ignore_va = U_TRAMPOLINE_ADDR + (def_ignore as usize - sutrampoline as usize);
+        trap_context.ra = ignore_va.0;
+        trap_context.epc = pcb_inner.signal_handler.get(&signal).unwrap().to_owned();
+    }
+
     drop(pcb_inner);
     intr_off();
     unsafe {
@@ -204,5 +222,4 @@ pub fn trap_return() -> ! {
         sepc::write(trap_context.epc.0);
         userret_fp(TRAP_CONTEXT_ADDR);
     }
-    unreachable!("Trap return unreachable")
 }

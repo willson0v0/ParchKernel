@@ -3,7 +3,7 @@ mod fmt_io;
 mod panic_handler;
 mod uart;
 mod lock;
-mod time;
+pub mod time;
 mod error;
 pub mod riscv;
 pub mod elf_rs_wrapper;

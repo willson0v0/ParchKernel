@@ -67,7 +67,7 @@ pub struct DEntry {
     name: String
 }
 
-pub trait File: Send + Sync + Drop + Debug {
+pub trait File: Send + Sync + Debug {
     fn write            (&self, data: Vec::<u8>, offset: usize) -> Result<(), ErrorNum>;
     fn read             (&self, length: usize, offset: usize) -> Result<Vec<u8>, ErrorNum>;
     fn as_socket    <'a>(self: Arc<Self>) -> Result<Arc<dyn SocketFile   + 'a>, ErrorNum> where Self: 'a;

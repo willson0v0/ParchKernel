@@ -1,3 +1,3 @@
 mod syscall;
 
-pub use syscall::syscall;
+pub use syscall::*;

@@ -1,9 +1,9 @@
 use core::fmt::{self, Debug, Formatter};
 
-use alloc::{sync::{Arc}, collections::BTreeMap, vec::Vec};
+use alloc::{sync::{Arc}, collections::BTreeMap, vec::Vec, borrow::ToOwned};
 use bitflags::*;
 use crate::{config::{PAGE_SIZE, PROC_K_STACK_SIZE, PROC_K_STACK_ADDR, PROC_U_STACK_SIZE, PROC_U_STACK_ADDR}, utils::{SpinMutex, Mutex}};
-use crate::{fs::{RegularFile, File}, utils::ErrorNum, config::{TRAMPOLINE_ADDR, U_TRAMPOLINE_ADDR, TRAP_CONTEXT_ADDR}};
+use crate::{fs::{RegularFile}, utils::ErrorNum, config::{TRAMPOLINE_ADDR, U_TRAMPOLINE_ADDR, TRAP_CONTEXT_ADDR}};
 
 use super::{types::{VPNRange, VirtPageNum, PhysPageNum}, PageGuard, pagetable::{PageTable, PTEFlags}, alloc_vm_page, PhysAddr};
 
@@ -56,6 +56,7 @@ pub trait Segment: Debug + Send + Sync {
     fn status(&self) -> SegmentStatus;
     fn seg_type(&self) -> SegmentType;
     fn start_vpn(&self) -> VirtPageNum;
+    fn clone_seg(&self) -> Result<Arc<dyn Segment>, ErrorNum>;
 }
 
 pub struct IdenticalMappingSegment (SpinMutex<IdenticalMappingSegmentInner>);
@@ -214,6 +215,11 @@ impl Segment for IdenticalMappingSegment {
     fn start_vpn(&self) -> VirtPageNum {
         self.0.acquire().range.start()
     }
+
+    fn clone_seg(&self) -> Result<Arc<dyn Segment>, ErrorNum> {
+        let inner = self.0.acquire();
+        Ok(Self::new(inner.range, inner.flag))
+    }
 }
 
 impl Segment for ManagedSegment {
@@ -269,6 +275,11 @@ impl Segment for ManagedSegment {
 
     fn start_vpn(&self) -> VirtPageNum {
         self.0.acquire().range.start()
+    }
+
+    fn clone_seg(&self) -> Result<Arc<dyn Segment>, ErrorNum> {
+        let inner = self.0.acquire();
+        Ok(Self::new(inner.range, inner.flag))
     }
 }
 
@@ -335,6 +346,11 @@ impl Segment for VMASegment {
     fn start_vpn(&self) -> VirtPageNum {
         self.0.acquire().start_vpn
     }
+
+    fn clone_seg(&self) -> Result<Arc<dyn Segment>, ErrorNum> {
+        let inner = self.0.acquire();
+        Ok(Self::new_at(inner.start_vpn, inner.file.clone(), inner.flag))
+    }
 }
 
 impl Segment for TrampolineSegment {
@@ -386,6 +402,10 @@ impl Segment for TrampolineSegment {
 
     fn start_vpn(&self) -> VirtPageNum {
         U_TRAMPOLINE_ADDR.into()
+    }
+
+    fn clone_seg(&self) -> Result<Arc<dyn Segment>, ErrorNum> {
+        Ok(Self::new())
     }
 }
 
@@ -439,6 +459,10 @@ impl Segment for UTrampolineSegment {
     fn start_vpn(&self) -> VirtPageNum {
         U_TRAMPOLINE_ADDR.into()
     }
+
+    fn clone_seg(&self) -> Result<Arc<dyn Segment>, ErrorNum> {
+        Ok(Self::new())
+    }
 }
 
 
@@ -490,6 +514,10 @@ impl Segment for TrapContextSegment {
 
     fn start_vpn(&self) -> VirtPageNum {
         TRAP_CONTEXT_ADDR.into()
+    }
+
+    fn clone_seg(&self) -> Result<Arc<dyn Segment>, ErrorNum> {
+        Ok(Self::new())
     }
 }
 
@@ -556,6 +584,10 @@ impl Segment for ProcKStackSegment {
     fn start_vpn(&self) -> VirtPageNum {
         TRAP_CONTEXT_ADDR.into()
     }
+
+    fn clone_seg(&self) -> Result<Arc<dyn Segment>, ErrorNum> {
+        Ok(Self::new())
+    }
 }
 
 impl Segment for ProcUStackSegment {
@@ -621,6 +653,10 @@ impl Segment for ProcUStackSegment {
     fn start_vpn(&self) -> VirtPageNum {
         TRAP_CONTEXT_ADDR.into()
     }
+
+    fn clone_seg(&self) -> Result<Arc<dyn Segment>, ErrorNum> {
+        Ok(Self::new())
+    }
 }
 
 impl IdenticalMappingSegment {
@@ -641,6 +677,19 @@ impl ManagedSegment {
             flag,
             status: SegmentStatus::Initialized
         })))
+    }
+
+    pub fn alter_permission(&self, flag: SegmentFlags, pagetable: &mut PageTable) -> SegmentFlags {
+        let mut inner = self.0.acquire();
+        assert!(inner.status == SegmentStatus::Mapped, "altering unmapped segment flag");
+        let original_flag = inner.flag;
+        inner.flag = flag;
+        for (vpn, pg) in inner.frames.iter() {
+            let vpn = vpn.to_owned();
+            let ppn = pg.ppn;
+            pagetable.remap(vpn, ppn, flag.into());
+        }
+        original_flag
     }
 }
 
