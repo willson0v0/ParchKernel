@@ -73,7 +73,7 @@ impl BitMapPageAllocator {
 	}
 
 	fn mark_available(&mut self, ppn: PhysPageNum, is_exec: bool) {
-		let index = ppn - PhysPageNum::from(BASE_ADDRESS as usize);
+		let index = ppn - PhysPageNum::from(PhysAddr::from(BASE_ADDRESS as usize));
 		if is_exec {
 			self.bitmap_mm.clear(index);
 		}
@@ -85,8 +85,8 @@ impl PageAllocator for BitMapPageAllocator {
     fn new(begin: PhysAddr, length: usize) -> Self {
 		verbose!("Initializeing BitMapPageAllocator");
         let mut res = Self {
-			bitmap_mm: BitMap::new((PAGE_BITMAP_MM_ADDRESS as usize).into(), PAGE_BITMAP_FS_ADDRESS as usize - PAGE_BITMAP_MM_ADDRESS as usize),
-			bitmap_fs: BitMap::new((PAGE_BITMAP_FS_ADDRESS as usize).into(), SUPERBLOCK_ADDRESS as usize - PAGE_BITMAP_FS_ADDRESS as usize)
+			bitmap_mm: BitMap::new((PAGE_BITMAP_MM_ADDRESS as usize).into(), (PAGE_BITMAP_FS_ADDRESS as usize - PAGE_BITMAP_MM_ADDRESS as usize) * 8),
+			bitmap_fs: BitMap::new((PAGE_BITMAP_FS_ADDRESS as usize).into(), (SUPERBLOCK_ADDRESS as usize - PAGE_BITMAP_FS_ADDRESS as usize) * 8)
 		};
 
 		// mark unavailable

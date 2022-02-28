@@ -1,8 +1,8 @@
 
 
-use core::cell::RefCell;
+use core::{cell::RefCell, cmp::min};
 
-use alloc::{vec::Vec, boxed::Box};
+use alloc::{vec::Vec};
 
 
 use super::PhysAddr;
@@ -17,41 +17,45 @@ extern "C" {
 //         SpinMutex::new("InodeBitmap", BitMap::new((INODE_BITMAP_ADDRESS as usize).into(), INODE_BITMAP_ADDRESS as usize - PAGE_BITMAP_MM_ADDRESS as usize));
 // }
 
-pub trait BitMapTrait {
-    fn get(&self) -> bool;
-    // fn set(&self)
-}
-
 pub struct BitMapIndex {
     bits: u64,
     level: usize,
     length: usize,
     sub_entries: Vec<RefCell<BitMapIndex>>,
+    sub_mask: u64
 }
 
 impl BitMapIndex {
+    /// Unit: u64
     pub fn new(length: usize) -> Self {
-        let length = length / 64;
         let mut level = None;
         for i in 0..10 {
-            if Self::powof64(i + 1) >= length {
+            if Self::capacity(i) >= length {
                 level = Some(i);
                 break;
             }
         }
         let level = level.unwrap();
         let mut sub_entries = Vec::new();
+        let mut sub_mask: u64 = 0;
         if level != 0 {
-            for _i in 0..(length/Self::powof64(level)) {
-                sub_entries.push(RefCell::new(Self::new(Self::powof64(level))))
+            let mut len = length;
+            while len > 0 {
+                let current_len = min(Self::capacity(level - 1), len);
+                sub_mask += 1 << (sub_entries.len());
+                sub_entries.push(RefCell::new(Self::new(current_len)));
+                len -= current_len;
             }
+        } else {
+            sub_mask = 0xFFFF_FFFF_FFFF_FFFF;
         }
         
         Self {
             bits: 0,
             level,
             length,
-            sub_entries
+            sub_entries,
+            sub_mask
         }
     }
 
@@ -72,8 +76,14 @@ impl BitMapIndex {
         }
     }
 
+    /// Unit: u64
+    fn capacity(level: usize) -> usize {
+        Self::powof64(level+1)
+    }
+
     fn subentry_capacity(&self) -> usize {
-        Self::powof64(self.level)
+        assert!(self.level > 0, "OOR");
+        Self::capacity(self.level - 1)
     }
 
     fn set_bit(&mut self, pos: usize) {
@@ -89,12 +99,13 @@ impl BitMapIndex {
     }
 
     pub fn is_full(&self) -> bool {
-        self.bits == 0xFFFF_FFFF_FFFF_FFFF
+        self.bits >= self.sub_mask
     }
     
     /// return true if all full
+    /// unit word
     pub fn set(&mut self, pos: usize) -> bool {
-        assert!(pos <= self.length, "index out of bound");
+        assert!(pos < self.length, "index out of bound");
         if self.is_full() {
             true
         } else if self.level == 0 {
@@ -111,7 +122,7 @@ impl BitMapIndex {
     }
     
     pub fn clear(&mut self, pos: usize) {
-        assert!(pos <= self.length, "index out of bound");
+        assert!(pos < self.length, "index out of bound");
         if self.level == 0 {
             self.clear_bit(pos);
         } else {
@@ -146,12 +157,16 @@ impl BitMapIndex {
         if self.is_full() {
             None
         } else {
-            for i in 0..64 {
-                if !self.get_bit(i) {
-                    if self.level != 0 {
-                        return Some(self.subentry_capacity() * i + self.sub_entries[i].borrow_mut().first_empty().unwrap());
-                    } else {
+            if self.level == 0 {
+                for i in 0..64 {
+                    if !self.get_bit(i) {
                         return Some(i);
+                    }
+                }
+            } else {
+                for i in 0..self.sub_entries.len() {
+                    if !self.get_bit(i) {
+                        return Some(self.subentry_capacity() * i + self.sub_entries[i].borrow().first_empty().unwrap());
                     }
                 }
             }
@@ -169,7 +184,7 @@ pub struct BitMap {
 impl BitMap {
     /// total_length in bits
     pub fn new(start_addr: PhysAddr, length: usize) -> Self {
-        let mut bi = BitMapIndex::new(length);
+        let mut bi = BitMapIndex::new(length/64);
 
         for i in 0..(length/64) {
             bi.set_val(i, unsafe{(start_addr+i).read_volatile::<u64>() == 0xFFFF_FFFF_FFFF_FFFF});

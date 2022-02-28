@@ -2,7 +2,7 @@ use core::{arch::asm};
 
 use alloc::{vec::Vec, sync::Arc};
 use riscv::register::{satp};
-use crate::{utils::{SpinMutex, ErrorNum, Mutex}, config::{PHYS_END_ADDR, MMIO_RANGES, PAGE_SIZE, PROC_K_STACK_ADDR, TRAMPOLINE_ADDR, U_TRAMPOLINE_ADDR, TRAP_CONTEXT_ADDR, PROC_U_STACK_ADDR}, mem::{TrampolineSegment, UTrampolineSegment, TrapContextSegment, IdenticalMappingSegment, segment::SegmentFlags, VirtAddr, types::VPNRange, ManagedSegment, stat_mem}, fs::RegularFile, process::{get_processor}};
+use crate::{utils::{SpinMutex, ErrorNum}, config::{PHYS_END_ADDR, MMIO_RANGES, PAGE_SIZE, PROC_K_STACK_ADDR, TRAMPOLINE_ADDR, U_TRAMPOLINE_ADDR, TRAP_CONTEXT_ADDR, PROC_U_STACK_ADDR}, mem::{TrampolineSegment, UTrampolineSegment, TrapContextSegment, IdenticalMappingSegment, segment::SegmentFlags, VirtAddr, types::VPNRange, ManagedSegment, stat_mem}, fs::RegularFile, process::{get_processor}};
 use lazy_static::*;
 use super::{PageTable, Segment, VirtPageNum, ProcKStackSegment, segment::ProcUStackSegment};
 
@@ -49,7 +49,7 @@ impl MemLayout {
         layout.register_segment(UTrampolineSegment::new());
         // trap_context
         verbose!("Registering TrapContext...");
-        layout.register_segment(TrapContextSegment::new());
+        layout.register_segment(TrapContextSegment::new(None));
         // text
         verbose!("Registering Kernel text...");
         layout.register_segment(
@@ -127,6 +127,7 @@ impl MemLayout {
     }
 
     pub fn reset(&mut self) -> Result<(), ErrorNum> {
+        verbose!("Resetting memory layout...");
         extern "C" {
             fn stext();
             fn srodata();
@@ -171,7 +172,7 @@ impl MemLayout {
 
     pub fn map_proc_stack(&mut self) {
         self.register_segment(ProcKStackSegment::new());
-        self.register_segment(ProcUStackSegment::new());
+        self.register_segment(ProcUStackSegment::new(None));
         self.do_map();
     }
 
@@ -207,7 +208,7 @@ impl MemLayout {
 
     // length in byte
     pub fn get_space(&self, length: usize) -> Result<VirtPageNum, ErrorNum> {
-        let vpn_top = VirtPageNum::from(PROC_K_STACK_ADDR - PAGE_SIZE);
+        let vpn_top = VirtPageNum::from(VirtAddr::from(PROC_K_STACK_ADDR - PAGE_SIZE));
         let vpn_bottom = VirtPageNum::from(VirtAddr::from(PHYS_END_ADDR.0));
         let page_count = (length / PAGE_SIZE) + 2; // guard page
         for vpn_s in VPNRange::new(vpn_top - page_count, vpn_bottom) {
@@ -286,7 +287,7 @@ impl MemLayout {
                 if p.flags().contains(ProgramHeaderFlags::WRITE) {
                     seg_flag = seg_flag | SegmentFlags::W;
                 }
-                let segment = ManagedSegment::new(VPNRange::new(seg_start, seg_end + 1), SegmentFlags::W | SegmentFlags::R);
+                let segment = ManagedSegment::new(VPNRange::new(seg_start, seg_end + 1), SegmentFlags::W | SegmentFlags::R, None);
                 self.register_segment(segment.clone());
                 self.do_map();
                 // copy data into it
@@ -310,7 +311,7 @@ impl MemLayout {
         };
 
         for seg in self.segments.iter() {
-            layout.register_segment(seg.clone_seg()?);
+            layout.register_segment(seg.clone().clone_seg()?);
         }
         layout.do_map();
         Ok(layout)

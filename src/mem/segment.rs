@@ -56,7 +56,7 @@ pub trait Segment: Debug + Send + Sync {
     fn status(&self) -> SegmentStatus;
     fn seg_type(&self) -> SegmentType;
     fn start_vpn(&self) -> VirtPageNum;
-    fn clone_seg(&self) -> Result<Arc<dyn Segment>, ErrorNum>;
+    fn clone_seg(self: Arc<Self>) -> Result<Arc<dyn Segment>, ErrorNum>;
 }
 
 pub struct IdenticalMappingSegment (SpinMutex<IdenticalMappingSegmentInner>);
@@ -67,12 +67,13 @@ struct IdenticalMappingSegmentInner {
     status: SegmentStatus
 }
 
-pub struct ManagedSegment (SpinMutex<ManagedSegmentInner>);
+pub struct ManagedSegment (pub SpinMutex<ManagedSegmentInner>);
 pub struct ManagedSegmentInner {
     range: VPNRange,
     frames: BTreeMap<VirtPageNum, PageGuard>,
     flag: SegmentFlags,
-    status: SegmentStatus
+    status: SegmentStatus,
+    pub clone_source: Option<Arc<ManagedSegment>>
 }
 
 pub struct VMASegment (SpinMutex<VMASegmentInner>);
@@ -94,10 +95,11 @@ pub struct UTrampolineSegmentInner {
     status: SegmentStatus
 }
 
-pub struct TrapContextSegment (SpinMutex<TrapContextSegmentInner>);
+pub struct TrapContextSegment (pub SpinMutex<TrapContextSegmentInner>);
 pub struct TrapContextSegmentInner {
-    status: SegmentStatus,
-    page: Option<PageGuard>
+    pub status: SegmentStatus,
+    pub page: Option<PageGuard>,
+    pub clone_source: Option<Arc<TrapContextSegment>>
 }
 
 pub struct ProcKStackSegment (SpinMutex<ProcKStackSegmentInner>);
@@ -106,10 +108,11 @@ pub struct ProcKStackSegmentInner {
     pub pages: Vec<PageGuard>
 }
 
-pub struct ProcUStackSegment (SpinMutex<ProcUStackSegmentInner>);
+pub struct ProcUStackSegment (pub SpinMutex<ProcUStackSegmentInner>);
 pub struct ProcUStackSegmentInner {
     pub status: SegmentStatus,
-    pub pages: Vec<PageGuard>
+    pub pages: Vec<PageGuard>,
+    pub clone_source: Option<Arc<ProcUStackSegment>>
 }
 
 impl Debug for IdenticalMappingSegment {
@@ -216,7 +219,7 @@ impl Segment for IdenticalMappingSegment {
         self.0.acquire().range.start()
     }
 
-    fn clone_seg(&self) -> Result<Arc<dyn Segment>, ErrorNum> {
+    fn clone_seg(self: Arc<Self>) -> Result<Arc<dyn Segment>, ErrorNum> {
         let inner = self.0.acquire();
         Ok(Self::new(inner.range, inner.flag))
     }
@@ -248,6 +251,12 @@ impl Segment for ManagedSegment {
         for vpn in inner.range {
             let pageguard = alloc_vm_page();
             let ppn = pageguard.ppn;
+
+            if let Some(source) = inner.clone_source.take() {
+                let source_ppn = source.0.acquire().frames.get(&vpn).unwrap().ppn;
+                unsafe {PhysPageNum::copy_page(&source_ppn, &ppn)}
+            }
+
             pagetable.map(vpn, ppn, inner.flag.into());
             inner.frames.insert(vpn, pageguard);
         }
@@ -255,11 +264,12 @@ impl Segment for ManagedSegment {
         Ok(())
     }
 
-    fn do_unmap(&self, _pagetable: &mut PageTable) -> Result<(), ErrorNum> {
+    fn do_unmap(&self, pagetable: &mut PageTable) -> Result<(), ErrorNum> {
         let mut inner = self.0.acquire();
         assert!(inner.status == SegmentStatus::Mapped);
         for vpn in inner.range {
             inner.frames.remove(&vpn).unwrap();
+            pagetable.unmap(vpn);
         }
         inner.status = SegmentStatus::Zombie;
         Ok(())
@@ -277,9 +287,9 @@ impl Segment for ManagedSegment {
         self.0.acquire().range.start()
     }
 
-    fn clone_seg(&self) -> Result<Arc<dyn Segment>, ErrorNum> {
+    fn clone_seg(self: Arc<Self>) -> Result<Arc<dyn Segment>, ErrorNum> {
         let inner = self.0.acquire();
-        Ok(Self::new(inner.range, inner.flag))
+        Ok(Self::new(inner.range, inner.flag, Some(self.clone())))
     }
 }
 
@@ -347,7 +357,7 @@ impl Segment for VMASegment {
         self.0.acquire().start_vpn
     }
 
-    fn clone_seg(&self) -> Result<Arc<dyn Segment>, ErrorNum> {
+    fn clone_seg(self: Arc<Self>) -> Result<Arc<dyn Segment>, ErrorNum> {
         let inner = self.0.acquire();
         Ok(Self::new_at(inner.start_vpn, inner.file.clone(), inner.flag))
     }
@@ -404,7 +414,7 @@ impl Segment for TrampolineSegment {
         U_TRAMPOLINE_ADDR.into()
     }
 
-    fn clone_seg(&self) -> Result<Arc<dyn Segment>, ErrorNum> {
+    fn clone_seg(self: Arc<Self>) -> Result<Arc<dyn Segment>, ErrorNum> {
         Ok(Self::new())
     }
 }
@@ -460,7 +470,7 @@ impl Segment for UTrampolineSegment {
         U_TRAMPOLINE_ADDR.into()
     }
 
-    fn clone_seg(&self) -> Result<Arc<dyn Segment>, ErrorNum> {
+    fn clone_seg(self: Arc<Self>) -> Result<Arc<dyn Segment>, ErrorNum> {
         Ok(Self::new())
     }
 }
@@ -490,6 +500,10 @@ impl Segment for TrapContextSegment {
         }
         let pageguard = alloc_vm_page();
         let ppn = pageguard.ppn;
+        if let Some(source) = inner.clone_source.take() {
+            let source_ppn = source.0.acquire().page.as_ref().unwrap().ppn;
+            unsafe {PhysPageNum::copy_page(&source_ppn, &ppn)}
+        }
         pagetable.map(
             TRAP_CONTEXT_ADDR.into(),
             ppn, 
@@ -516,8 +530,8 @@ impl Segment for TrapContextSegment {
         TRAP_CONTEXT_ADDR.into()
     }
 
-    fn clone_seg(&self) -> Result<Arc<dyn Segment>, ErrorNum> {
-        Ok(Self::new())
+    fn clone_seg(self: Arc<Self>) -> Result<Arc<dyn Segment>, ErrorNum> {
+        Ok(Self::new(Some(self.clone())))
     }
 }
 
@@ -550,8 +564,9 @@ impl Segment for ProcKStackSegment {
         for i in 0..page_count {
             let pageguard = alloc_vm_page();
             let ppn = pageguard.ppn;
+            let vpn = start_vpn + i;
             pagetable.map(
-                start_vpn + i,
+                vpn,
                 ppn, 
                 PTEFlags::R | PTEFlags::W
             );
@@ -585,7 +600,7 @@ impl Segment for ProcKStackSegment {
         TRAP_CONTEXT_ADDR.into()
     }
 
-    fn clone_seg(&self) -> Result<Arc<dyn Segment>, ErrorNum> {
+    fn clone_seg(self: Arc<Self>) -> Result<Arc<dyn Segment>, ErrorNum> {
         Ok(Self::new())
     }
 }
@@ -619,6 +634,12 @@ impl Segment for ProcUStackSegment {
         for i in 0..page_count {
             let pageguard = alloc_vm_page();
             let ppn = pageguard.ppn;
+
+            if let Some(source) = inner.clone_source.take() {
+                let source_ppn = source.0.acquire().pages.get(i).unwrap().ppn;
+                unsafe {PhysPageNum::copy_page(&source_ppn, &ppn)};
+            }
+
             pagetable.map(
                 start_vpn + i,
                 ppn, 
@@ -637,6 +658,7 @@ impl Segment for ProcUStackSegment {
         for i in 0..page_count {
             pagetable.unmap(start_vpn + i);
         }
+        // TODO: preserve pages for future lazy cow
         inner.pages.clear();
         inner.status = SegmentStatus::Zombie;
         Ok(())
@@ -654,8 +676,8 @@ impl Segment for ProcUStackSegment {
         TRAP_CONTEXT_ADDR.into()
     }
 
-    fn clone_seg(&self) -> Result<Arc<dyn Segment>, ErrorNum> {
-        Ok(Self::new())
+    fn clone_seg(self: Arc<Self>) -> Result<Arc<dyn Segment>, ErrorNum> {
+        Ok(Self::new(Some(self.clone())))
     }
 }
 
@@ -670,12 +692,13 @@ impl IdenticalMappingSegment {
 }
 
 impl ManagedSegment {
-    pub fn new(range: VPNRange, flag: SegmentFlags) -> Arc<Self> {
+    pub fn new(range: VPNRange, flag: SegmentFlags, clone_source: Option<Arc<Self>>) -> Arc<Self> {
         Arc::new(Self( SpinMutex::new("Segment lock", ManagedSegmentInner{
             range,
             frames: BTreeMap::new(),
             flag,
-            status: SegmentStatus::Initialized
+            status: SegmentStatus::Initialized,
+            clone_source
         })))
     }
 
@@ -719,8 +742,8 @@ impl UTrampolineSegment {
 }
 
 impl TrapContextSegment {
-    pub fn new() -> Arc<Self> {
-        Arc::new(Self(SpinMutex::new("Segment lock",  TrapContextSegmentInner{ status: SegmentStatus::Initialized, page: None} )))
+    pub fn new(clone_source: Option<Arc<Self>>) -> Arc<Self> {
+        Arc::new(Self(SpinMutex::new("Segment lock",  TrapContextSegmentInner{ status: SegmentStatus::Initialized, page: None, clone_source} )))
     }
 }
 
@@ -731,7 +754,7 @@ impl ProcKStackSegment {
 }
 
 impl ProcUStackSegment {
-    pub fn new() -> Arc<Self> {
-        Arc::new(Self(SpinMutex::new("Segment lock", ProcUStackSegmentInner{ status: SegmentStatus::Initialized, pages: Vec::new()})))
+    pub fn new(clone_source: Option<Arc<Self>>) -> Arc<Self> {
+        Arc::new(Self(SpinMutex::new("Segment lock", ProcUStackSegmentInner{ status: SegmentStatus::Initialized, pages: Vec::new(), clone_source})))
     }
 }

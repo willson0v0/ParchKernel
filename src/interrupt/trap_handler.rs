@@ -9,7 +9,7 @@ use riscv::register::{scause::{   // s cause register
     }, sepc, sip, sstatus::{self, SPP}, stval, stvec};
 
 use super::PLIC0;
-use crate::{config::{UART0_IRQ, TRAMPOLINE_ADDR, PROC_K_STACK_ADDR, PROC_K_STACK_SIZE, TRAP_CONTEXT_ADDR, PROC_U_STACK_ADDR, PROC_U_STACK_SIZE, U_TRAMPOLINE_ADDR}, process::{get_processor, ProcessStatus, intr_off, get_hart_id, intr_on, def_handler::def_ignore}, mem::VirtAddr, interrupt::trap_context::TrapContext, syscall::syscall};
+use crate::{config::{UART0_IRQ, TRAMPOLINE_ADDR, PROC_K_STACK_ADDR, PROC_K_STACK_SIZE, TRAP_CONTEXT_ADDR, PROC_U_STACK_ADDR, PROC_U_STACK_SIZE, U_TRAMPOLINE_ADDR}, process::{get_processor, ProcessStatus, intr_off, get_hart_id, intr_on, def_handler::def_ignore, SignalNum}, mem::VirtAddr, interrupt::trap_context::TrapContext, syscall::syscall};
 use crate::utils::UART0;
 
 /// Set trap entry to kernel trap handling function.
@@ -96,6 +96,7 @@ pub fn kernel_trap() {
 
 #[no_mangle]
 pub fn user_trap() -> ! {
+    set_kernel_trap_entry();
     let scause = scause::read();
     let stval = stval::read();
     let sstatus = sstatus::read();
@@ -104,11 +105,9 @@ pub fn user_trap() -> ! {
     trap_context.epc = sepc.into();
 
     assert!(sstatus.spp() == SPP::User, "user_trap not from user mode");
-    set_kernel_trap_entry();
 
     match scause.cause() {
         Trap::Exception(Exception::UserEnvCall) => {
-            verbose!("UserEnvCall, epc @ {:?}", trap_context.epc);
             let syscall_id = trap_context.a7;
             let args = [
                 trap_context.a0,
@@ -128,9 +127,19 @@ pub fn user_trap() -> ! {
             }
         },
         Trap::Interrupt(Interrupt::SupervisorTimer) => {
+            verbose!("SupervisorTimer");
             get_processor().suspend_switch();
         },
         Trap::Interrupt(Interrupt::SupervisorSoft) => {
+            let cleared_sip = sip::read().bits() & !2;
+            unsafe {
+                asm! {
+                    "csrw sip, {0}",
+                    in(reg) cleared_sip
+                };
+            }
+            assert!(sip::read().bits() & 2 == 0, "Failed to clear ssip");
+            verbose!("SupervisorSoft");
             get_processor().suspend_switch();
         },
         _ => {
@@ -166,7 +175,10 @@ pub fn user_trap() -> ! {
             }
             fatal!("STVAL: {:x}", stval);
             fatal!("SEPC : {:x}", sepc::read());
-            panic!("Kernel panic");
+            fatal!("User Program dead.");
+            let proc = get_processor().current().unwrap();
+            let mut proc_inner = proc.get_inner();
+            proc_inner.recv_signal(SignalNum::SIGSEGV).unwrap();
         }
     }
     trap_return();
@@ -174,6 +186,7 @@ pub fn user_trap() -> ! {
 
 #[no_mangle]
 pub fn trap_return() -> ! {
+    intr_off();
     let pcb = get_processor().current().unwrap();
     let mut pcb_inner = pcb.get_inner();
     let trap_context = TrapContext::current_ref();
@@ -213,7 +226,6 @@ pub fn trap_return() -> ! {
     }
 
     drop(pcb_inner);
-    intr_off();
     unsafe {
         let userret_fp: extern "C" fn(VirtAddr) -> ! = core::mem::transmute(userret_addr.0 as *const ());
         stvec::write(uservec_addr.0, stvec::TrapMode::Direct);

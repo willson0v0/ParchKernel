@@ -10,6 +10,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::config::{PAGE_OFFSET, PAGE_SIZE};
+use crate::process::{push_sum_on, pop_sum_on};
 use crate::utils::ErrorNum;
 use crate::utils::range::{StepUp, StepDown, Range};
 
@@ -187,17 +188,18 @@ impl VirtAddr {
     }
 
     pub fn read_cstr_raw(&self, size_limit: usize) -> Vec<u8> {
+        push_sum_on();
         let mut bytes = Vec::new();
         let mut va = self.clone();
         loop {
             let b: u8 = unsafe{va.read_volatile()};
-            if b == 0 || bytes.len() >= (size_limit - 1) {
+            if b == 0 || bytes.len() >= size_limit {
                 break;
             }
             bytes.push(b);
             va = va + size_of::<u8>();
         }
-        bytes.push(0);
+        pop_sum_on();
         bytes
     }
 
@@ -396,6 +398,12 @@ impl PhysPageNum {
         let empty: &[u8; PAGE_SIZE] = &[0u8; PAGE_SIZE];
         let src: *const u8 = empty.as_ptr();
         core::ptr::copy_nonoverlapping(src, (self.0 << PAGE_OFFSET) as *mut u8, PAGE_SIZE);
+    }
+
+    pub unsafe fn copy_page(src: &Self, dst: &Self) {
+        let src = (src.0 << PAGE_OFFSET) as *const u8;
+        let dst = (dst.0 << PAGE_OFFSET) as *mut u8;
+        core::ptr::copy_nonoverlapping(src, dst, PAGE_SIZE);
     }
 }
 

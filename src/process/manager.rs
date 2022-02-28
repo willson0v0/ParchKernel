@@ -44,7 +44,7 @@ impl ProcessManagerInner {
     }
 
     pub fn dequeue(&mut self) -> Option<Arc<ProcessControlBlock>> {
-        if let Some(proc ) = self.process_list.pop_back() {
+        if let Some(proc ) = self.process_list.pop_front() {
             self.running_list[get_hart_id()] = Some(proc.clone());
             Some(proc)
         } else {

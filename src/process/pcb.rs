@@ -2,7 +2,7 @@ use core::{mem::size_of, cmp::Ordering};
 
 use alloc::{sync::{Arc, Weak}, collections::{BTreeMap, VecDeque, BTreeSet}, vec::Vec};
 
-use crate::{mem::{MemLayout, VirtAddr, VirtPageNum}, utils::{SpinMutex, MutexGuard, Mutex, ErrorNum}, fs::{Path, open, OpenMode, RegularFile, File}, interrupt::trap_context::TrapContext, config::{TRAP_CONTEXT_ADDR, PROC_U_STACK_ADDR, PROC_U_STACK_SIZE, U_TRAMPOLINE_ADDR, MAX_FD}, process::def_handler::*};
+use crate::{mem::{MemLayout, VirtAddr, VirtPageNum}, utils::{SpinMutex, MutexGuard, Mutex, ErrorNum}, fs::{Path, open, OpenMode, RegularFile, File}, interrupt::trap_context::TrapContext, config::{TRAP_CONTEXT_ADDR, PROC_U_STACK_ADDR, PROC_U_STACK_SIZE, U_TRAMPOLINE_ADDR, MAX_FD}, process::{def_handler::*, push_sum_on, pop_sum_on}};
 
 use super::{ProcessID, new_pid, processor::ProcessContext, SignalNum};
 
@@ -93,19 +93,23 @@ impl ProcessControlBlock {
     }
 
     pub fn exec(&self, elf_file: Arc<dyn RegularFile>, args: Vec<Vec<u8>>) -> Result<(), ErrorNum> {
+        verbose!("pcb exec");
         let mut inner = self.get_inner();
         assert!(inner.status == ProcessStatus::Running, "Exec on process that is not running");
         inner.mem_layout.reset()?;
         let entry = inner.mem_layout.map_elf(elf_file.clone())?;
+        inner.mem_layout.do_map();
+        verbose!("mem_layout done");
         inner.elf_file = elf_file.clone();
         inner.entry_point = entry;
         inner.files = PCBInner::default_fds()?;
-        inner.trace = cfg!(debug_assertions);
+        inner.trace = false;
         inner.signal_contexts.clear();
         inner.signal_handler = PCBInner::default_hander();
         inner.signal_enable = PCBInner::defualt_mask();
         inner.pending_signal.clear();
         
+        push_sum_on();
         // copy args into user stack
         let mut ptr = PROC_U_STACK_ADDR + PROC_U_STACK_SIZE;
         let mut argv = Vec::new();
@@ -114,19 +118,21 @@ impl ProcessControlBlock {
             unsafe{ptr.write_data(arg)};
             argv.push(ptr);
         }
+        argv.push(0.into());
         let argv_ptr = ptr - argv.len() * size_of::<VirtAddr>();
         ptr = argv_ptr;
-        argv.push(0.into());
         for arg_ptr in argv.iter() {
             unsafe{ptr.write_volatile(arg_ptr)};
             ptr = ptr + size_of::<VirtAddr>();
         }
+        pop_sum_on();
 
-        let mut trap_context = TrapContext::current_ref();
+        let trap_context = TrapContext::current_ref();
         *trap_context = TrapContext::new();
         trap_context.a0 = argv.len() - 1;
         trap_context.a1 = argv_ptr.0;
         trap_context.sp = argv_ptr.0;
+        trap_context.epc = entry;
 
         Ok(())
     }
@@ -152,7 +158,7 @@ impl PCBInner {
             entry_point: 0.into(),
             proc_context: ProcessContext::new(),
             files: Self::default_fds().unwrap(),
-            trace: cfg!(debug_assertions),
+            trace: false,
             signal_handler,
             signal_contexts: Vec::new(),
             signal_enable,

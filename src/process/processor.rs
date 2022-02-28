@@ -139,6 +139,7 @@ impl Processor {
     pub fn run(&self) -> ! {
         loop {
             if let Some(proc) = dequeue() {
+                verbose!("Found available process {}", proc.pid);
                 let mut pcb_inner = proc.get_inner();
                 // Initialized process going to trap_return(), where it will map elf and change status to ready
                 if pcb_inner.status != ProcessStatus::Initialized {
@@ -163,9 +164,10 @@ impl Processor {
             }
         }
     }
-
+    
     pub fn suspend_switch(&self) {
         let process = self.take_current().expect("Suspend switch need running process to work");
+        verbose!("Switching out from {} context", process.pid);
         let mut pcb_inner = process.get_inner();
         let proc_context = pcb_inner.context_ptr();
         let idle_context = self.context_ptr();

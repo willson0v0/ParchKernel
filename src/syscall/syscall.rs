@@ -38,10 +38,10 @@ macro_rules! CALL_SYSCALL {
             let do_trace = process.get_inner().trace;
             if do_trace {
                 debug!("SYSCALL {} CALLED BY {:?}", stringify!($syscall_name), process.pid);
+                $(
+                    verbose!("{:>25} = {:?}", stringify!{$y}, $y);
+                )+
             }
-            $(
-                verbose!("{:>25} = {:?}", stringify!{$y}, $y);
-            )+
             let ret = $syscall_name($($y),+);
             if do_trace {
                 debug!("SYSCALL {} CALLED BY {:?} RESULT {:?}", stringify!($syscall_name), process.pid, ret);
@@ -148,15 +148,17 @@ pub fn sys_exec(elf_path: VirtAddr, argv: VirtAddr) -> Result<usize, ErrorNum> {
     let mut p = argv;
     if p.0 != 0 {
         loop {
-            let bytes = p.read_cstr_raw(1024);
+            let mut bytes = p.read_cstr_raw(1023);
             if bytes.len() == 0 {
                 break;
             }
+            bytes.push(0);
             p += bytes.len();
             args.push(bytes);
         }
     }
     let proc = get_processor().current().unwrap();
+    debug!("proc {} exec {:?}", proc.pid, path);
     let elf_file = open(&path, OpenMode::SYS)?.as_regular()?;
     proc.exec(elf_file, args)?;
     Ok(0)
@@ -191,6 +193,7 @@ pub fn sys_mmap(fd: FileDescriptor, flag: SegmentFlags) -> Result<usize, ErrorNu
 }
 
 pub fn sys_waitpid(pid: isize, exit_code: VirtAddr) -> Result<usize, ErrorNum> {
+    info!("Waitpid called for {} from {}", pid, get_processor().current().unwrap().pid);
     loop {
         let proc = get_processor().current().unwrap();
         let mut pcb_inner = proc.get_inner();
@@ -217,6 +220,7 @@ pub fn sys_waitpid(pid: isize, exit_code: VirtAddr) -> Result<usize, ErrorNum> {
             return Ok(corpse.pid.0);
         } else {
             drop(pcb_inner);
+            verbose!("Waitpid not found");
             get_processor().suspend_switch();
         }
     }
