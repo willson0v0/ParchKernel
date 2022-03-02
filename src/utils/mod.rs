@@ -1,5 +1,9 @@
 #[macro_use]
 mod fmt_io;
+
+#[macro_use]
+pub mod marcos;
+
 mod panic_handler;
 mod uart;
 mod lock;
@@ -22,6 +26,7 @@ pub use uart::{
 
 pub use fmt_io::{
     print,
+    print_no_lock,
     log,
     LogLevel,
     get_char,

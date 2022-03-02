@@ -3,9 +3,9 @@
 
 use alloc::string::String;
 
-use crate::{process::{push_intr_off, pop_intr_off}, utils::time::{get_time, get_time_ms, get_time_second}};
+use crate::{process::{push_intr_off, pop_intr_off, get_hart_id}, utils::time::{get_time, get_time_ms, get_time_second}, println, print, print_no_lock};
 
-use super::UART0;
+use super::{UART0, SpinMutex, Mutex};
 use core::fmt::{self, Write};
 
 // ======================== color constants ========================
@@ -49,11 +49,15 @@ const BG_B_WHITE    :u8 = 107;
 
 const BG_DEFAULT    :u8 = 49;
 
+use lazy_static::*;
+lazy_static!{
+    /// dummy data member
+    static ref PRINT_LOCK: SpinMutex<bool> = SpinMutex::new("KPuts", false);
+}
+
 // ======================== functions ========================
 pub fn k_puts(ch: &str) {
-    push_intr_off();
 	UART0.write_synced(ch);
-    pop_intr_off();
 }
 
 struct  OutputFormatter;
@@ -66,26 +70,12 @@ impl Write for OutputFormatter {
 }
 
 pub fn print(args: fmt::Arguments) {
-	OutputFormatter.write_fmt(args).unwrap();
+    let guard = PRINT_LOCK.acquire();
+	print_no_lock(args);
 }
 
-#[macro_export]
-macro_rules! print {
-    ($($arg:tt)*) => {
-        $crate::utils::print(format_args!($($arg)*))
-    }
-}
-
-/// The great println! macro. Prints to the standard output. Also prints a linefeed (`\\n`, or U+000A).
-#[macro_export]
-macro_rules! println {
-    () => {
-        $crate::print!("\r\n")
-    };
-    
-    ($($arg:tt)*) => {
-        $crate::print!("{}\r\n", format_args!($($arg)*))
-    };
+pub fn print_no_lock(args: fmt::Arguments) {
+    OutputFormatter.write_fmt(args).unwrap();
 }
 
 #[derive(PartialEq, PartialOrd, Clone, Copy)]
@@ -136,15 +126,15 @@ static LOG_TITLE: &'static [&str] = &[
 ];
 
 pub fn do_log(log_level: LogLevel, args: fmt::Arguments) {
-    print!("\x1b[{};{}m{}", LOG_FG_COLOURS[log_level.to_num()], LOG_BG_COLOURS[log_level.to_num()], LOG_TITLE[log_level.to_num()]);
-    print!("[{:<4.5}]\t", get_time_second());
-    print(args);
-    println!("\x1b[{};{}m", FG_DEFAULT, BG_DEFAULT)
+    print_no_lock!("\x1b[{};{}m{}", LOG_FG_COLOURS[log_level.to_num()], LOG_BG_COLOURS[log_level.to_num()], LOG_TITLE[log_level.to_num()]);
+    print_no_lock!("[{:>10.5}] on hart {}: ", get_time_second(), get_hart_id());
+    print_no_lock(args);
+    print_no_lock!("\x1b[{};{}m\r\n", FG_DEFAULT, BG_DEFAULT)
 }
 
 
 pub fn log(log_level: LogLevel, args: fmt::Arguments) {
-    push_intr_off();
+    let guard = PRINT_LOCK.acquire();
     match log_level {
         LogLevel::Verbose => {
             if cfg!(feature = "log_verbose") {
@@ -182,64 +172,8 @@ pub fn log(log_level: LogLevel, args: fmt::Arguments) {
             }
         },
     }
-    pop_intr_off();
 }
 
-#[macro_export]
-macro_rules! verbose {
-    ($($arg:tt)*) => {
-        $crate::utils::log($crate::utils::LogLevel::Verbose, format_args!($($arg)*))
-    }
-}
-
-#[macro_export]
-macro_rules! debug {
-    ($($arg:tt)*) => {
-        $crate::utils::log($crate::utils::LogLevel::Debug, format_args!($($arg)*))
-    }
-}
-
-#[macro_export]
-macro_rules! info {
-    ($($arg:tt)*) => {
-        $crate::utils::log($crate::utils::LogLevel::Info, format_args!($($arg)*))
-    }
-}
-
-#[macro_export]
-macro_rules! warning {
-    ($($arg:tt)*) => {
-        $crate::utils::log($crate::utils::LogLevel::Warning, format_args!($($arg)*))
-    }
-}
-
-#[macro_export]
-macro_rules! error {
-    ($($arg:tt)*) => {
-        $crate::utils::log($crate::utils::LogLevel::Error, format_args!($($arg)*))
-    }
-}
-
-#[macro_export]
-macro_rules! milestone {
-    ($($arg:tt)*) => {
-        $crate::utils::log($crate::utils::LogLevel::Milestone, format_args!($($arg)*))
-    }
-}
-
-#[macro_export]
-macro_rules! fatal {
-    ($($arg:tt)*) => {
-        $crate::utils::log($crate::utils::LogLevel::Fatal, format_args!($($arg)*))
-    }
-}
-
-#[macro_export]
-macro_rules! log {
-    ($lvl:tt, $($arg:tt)*) => {
-        $crate::utils::log($lvl, format_args!($($arg)*));
-    }
-}
 
 pub fn get_char() -> char {
     super::UART0.read()

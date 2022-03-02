@@ -32,7 +32,10 @@ extern crate lazy_static;
 extern crate static_assertions;
 extern crate elf_rs;
 
-use core::{arch::{global_asm, asm}};
+// #[macro_use]
+// extern crate alloc_no_stdlib;
+
+use core::{arch::{global_asm, asm}, sync::atomic::{AtomicBool, Ordering}};
 
 global_asm!(include_str!("crt_setup.asm"));
 global_asm!(include_str!("interrupt/kernel_trap.asm"));
@@ -42,14 +45,20 @@ global_asm!(include_str!("interrupt/u_trampoline.asm"));
 
 use riscv::register::{medeleg, mepc, mhartid, mideleg, mie, mscratch, mstatus, mtvec, pmpaddr0, pmpcfg0, satp, sie};
 
-static mut MSCRATCH_ARR: [[usize; 6]; config::MAX_CPUS] = [[0; 6]; config::MAX_CPUS];
-
-
-
-pub const HART_REGISTER: &[bool; config::MAX_CPUS] = &[false; config::MAX_CPUS];
+use crate::process::get_hart_id;
 
 #[no_mangle]
-extern "C" fn genesis_m() -> ! {
+#[link_section = ".bss"]
+static mut MSCRATCH_ARR: [[usize; 6]; config::MAX_CPUS] = [[0; 6]; config::MAX_CPUS];
+#[no_mangle]
+#[link_section = ".bss"]
+static mut HART_REGISTER: [bool; config::MAX_CPUS] = [false; config::MAX_CPUS];
+#[no_mangle]
+#[link_section = ".bss"]
+static BOOT_FIN: AtomicBool = AtomicBool::new(false);
+
+#[no_mangle]
+extern "C" fn genesis_m(hart_id: usize) -> ! {
     // set mstatus previous privilege
     extern "C" {
         fn genesis_s();
@@ -96,10 +105,7 @@ extern "C" fn genesis_m() -> ! {
         // set phys addr protection
         pmpaddr0::write(0x3fffffffffffffusize);
         pmpcfg0::write(0xfusize);
-        let hart_id = mhartid::read();
-        let ptr = HART_REGISTER as *const bool as *mut bool;
-        let mut_slice = core::slice::from_raw_parts_mut(ptr, config::MAX_CPUS);
-        mut_slice[hart_id] = true;
+        HART_REGISTER[hart_id] = true;
         // set timer interrupt and set up mscratch
         // mscratch for the cpu will store registers used in timervec
         // scratch[0,1,2] : register save area.
@@ -115,25 +121,23 @@ extern "C" fn genesis_m() -> ! {
         mstatus::set_mie();
         // set thread pointer and return
         asm! {
-            "mv tp, {0}",
-            "mret",
-            in(reg) hart_id
+            "mret"
         };
     }
     
     unreachable!()
 }
 
+
 #[no_mangle]
-extern "C" fn genesis_s() {
-    let mut hart0_fin = false;
-    if process::get_hart_id() == 0 {
+extern "C" fn genesis_s() -> ! {
+    process::intr_off();
+    if get_hart_id() == 0 {
         // common init code (mm/fs)
         interrupt::set_kernel_trap_entry();
-        process::intr_on();
         mem::init();
+        process::intr_on();
         mem::hart_init();
-        info!("Current vm mem usage: {:?}", mem::stat_mem());
         
         println!("\r\n\n\n\nParch OS\n");
         println!("Ver\t: {}", version::VERSION);
@@ -142,16 +146,15 @@ extern "C" fn genesis_s() {
 
         process::init();
 
-        hart0_fin = true;
+        milestone!("Hart 0 boot sequence done.");
+        {BOOT_FIN.store(true, Ordering::Release);}
     } else {
-        while !hart0_fin {}
+        interrupt::set_kernel_trap_entry();
+        while !BOOT_FIN.load(Ordering::Acquire) {}
         mem::hart_init();
+        process::intr_on();
     }
-    assert!(hart0_fin, "???");
-
     process::hart_init();
     
-    loop{
-        print!("a");
-    }
+    unreachable!();
 }

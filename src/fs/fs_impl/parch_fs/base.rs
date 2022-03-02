@@ -1,4 +1,4 @@
-use crate::{fs::{vfs::OpenMode, fs_impl::parch_fs::{BAD_BLOCK, BLOCKNO_PER_BLK, PFS_MAXCAP}, Path, types::FileType}, mem::{PageGuard, VirtPageNum, claim_fs_page, VirtAddr}, utils::{ErrorNum, Mutex, MutexGuard}};
+use crate::{fs::{vfs::OpenMode, fs_impl::parch_fs::{BAD_BLOCK, BLOCKNO_PER_BLK, PFS_MAXCAP}, Path, types::FileType}, mem::{PageGuard, VirtPageNum, claim_fs_page, VirtAddr}, utils::{ErrorNum, Mutex, MutexGuard, time::get_real_time_epoch}};
 use super::{DIRECT_BLK_COUNT, BLK_SIZE, fs::{ParchFS, ParchFSInner}, BlockNo, INodeNo, PFSINode};
 
 
@@ -24,42 +24,6 @@ impl PFSBase {
             fs,
             path
         })
-        // let cpu = get_cpu();
-        // let cpu_inner = cpu.acquire();
-        // let fs = fs.upgrade().unwrap();
-        // let mut fs_inner = fs.inner.acquire();
-        // if let Some(pcb) = &cpu_inner.pcb {
-        //     let mut pcb_inner = pcb.get_inner();
-        //     let mem_layout = &mut pcb_inner.mem_layout;
-        //     let len = fs_inner.get_inode(inode_no)?.acquire().f_size;
-        //     let mmap_start = mem_layout.get_space(len)?;
-        //     let res = Self {
-        //         inode_no,
-        //         mmap_start: None,
-        //         open_mode,
-        //         fs: Arc::downgrade(&fs),
-        //         path
-        //     };
-        //     let vma_segment = VMASegment::new_at(mmap_start, len, 0, Arc::new(res), open_mode.into())?;
-        //     mem_layout.add_segment(vma_segment);
-        //     mem_layout.do_map();
-        //     Ok(res)
-        // } else {
-        //     drop(cpu_inner);
-        //     let mut mem_layout = SCHEDULER_MEM_LAYOUT.acquire();
-        //     let len = fs_inner.get_inode(inode_no)?.acquire().f_size;
-        //     let mmap_start = mem_layout.get_space(len)?;
-        //     let res = Self {
-        //         inode_no,
-        //         mmap_start,
-        //         open_mode,
-        //         fs: Arc::downgrade(&fs),
-        //         path
-        //     };
-        //     let vma_segment = VMASegment::new_at(mmap_start, len, 0, res.clone(), open_mode.into())?;
-        //     mem_layout.add_segment(vma_segment);
-        //     mem_layout.do_map();
-        //     Ok(res)
     }
 
     pub fn get_blockno_locked(&self, offset: usize, create: bool, fs_inner: &mut MutexGuard<ParchFSInner>, inode: &mut MutexGuard<&mut PFSINode>) -> Result<BlockNo, ErrorNum> {
@@ -292,6 +256,8 @@ impl PFSBase {
         let mut fs_inner = fs.inner.acquire();
         let inode_guard = fs_inner.get_inode(self.inode_no)?;
         let mut inode = inode_guard.acquire();
+        inode.change_time = get_real_time_epoch();
+        inode.access_time = get_real_time_epoch();
         if inode.f_size < offset + data.len() {
             self.expand_locked(offset + data.len(), &mut fs_inner, &mut inode)?;
         }
@@ -324,6 +290,12 @@ impl PFSBase {
     }
 
     pub fn read(&self, length: usize, mut offset: usize) -> Result<alloc::vec::Vec<u8>, crate::utils::ErrorNum> {
+        let fs = self.fs.upgrade().unwrap();
+        let mut fs_inner = fs.inner.acquire();
+        let inode_guard = fs_inner.get_inode(self.inode_no)?;
+        let mut inode = inode_guard.acquire();
+        inode.access_time = get_real_time_epoch();
+
         if length == 0 {return Ok(Vec::new())}
         if let Some(mmap_start) = self.mmap_start {
             unsafe {
@@ -331,9 +303,6 @@ impl PFSBase {
             }
         } else {
             let fs = self.fs.upgrade().unwrap();
-            let mut fs_inner = fs.inner.acquire();
-            let inode_guard = fs_inner.get_inode(self.inode_no)?;
-            let mut inode = inode_guard.acquire();
             let mut result: Vec<u8> = Vec::new();
             let target = length + offset;
             while offset < target {

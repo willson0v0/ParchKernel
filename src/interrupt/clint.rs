@@ -1,19 +1,16 @@
 /// Core Local Interrupt
 /// 
 use crate::mem::PhysAddr;
-use lazy_static::*;
 use crate::config::CLINT_ADDR;
 
-lazy_static! {
-    pub static ref CLINT: Clint = Clint::new(CLINT_ADDR);
-}
+pub static CLINT: Clint = Clint::new(CLINT_ADDR);
 
 pub struct Clint {
     address: PhysAddr,
 }
 
 impl Clint {
-    pub fn new(address: PhysAddr) -> Self {
+    pub const fn new(address: PhysAddr) -> Self {
         Clint {
             address
         }

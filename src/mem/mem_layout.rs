@@ -1,30 +1,23 @@
 use core::{arch::asm};
 
-use alloc::{vec::Vec, sync::Arc};
+use alloc::{vec::Vec, sync::Arc, borrow::ToOwned};
 use riscv::register::{satp};
-use crate::{utils::{SpinMutex, ErrorNum}, config::{PHYS_END_ADDR, MMIO_RANGES, PAGE_SIZE, PROC_K_STACK_ADDR, TRAMPOLINE_ADDR, U_TRAMPOLINE_ADDR, TRAP_CONTEXT_ADDR, PROC_U_STACK_ADDR}, mem::{TrampolineSegment, UTrampolineSegment, TrapContextSegment, IdenticalMappingSegment, segment::SegmentFlags, VirtAddr, types::VPNRange, ManagedSegment, stat_mem}, fs::RegularFile, process::{get_processor}};
-use lazy_static::*;
-use super::{PageTable, Segment, VirtPageNum, ProcKStackSegment, segment::ProcUStackSegment};
+use crate::{utils::{SpinMutex, ErrorNum}, config::{PHYS_END_ADDR, MMIO_RANGES, PAGE_SIZE, PROC_K_STACK_ADDR, TRAMPOLINE_ADDR, U_TRAMPOLINE_ADDR, TRAP_CONTEXT_ADDR, PROC_U_STACK_ADDR}, mem::{TrampolineSegment, UTrampolineSegment, TrapContextSegment, IdenticalMappingSegment, segment::SegmentFlags, VirtAddr, types::VPNRange, ManagedSegment, stat_mem}, fs::RegularFile, process::{get_processor, get_hart_id}};
+use super::{PageTable, Segment, VirtPageNum, ProcKStackSegment, segment::ProcUStackSegment, ArcSegment};
 
 use crate::utils::elf_rs_wrapper::read_elf;
 use elf_rs::*;
 
 use elf_rs::ElfFile;
 
-
-lazy_static! {
-    /// The scheduler kernel space memory layout.
-    pub static ref SCHEDULER_MEM_LAYOUT: Arc<SpinMutex<MemLayout>> = Arc::new(SpinMutex::new("Scheduler memlayout", MemLayout::new()));
-}
-
-
 pub struct MemLayout {
     pub pagetable: PageTable,
-    pub segments: Vec<Arc<dyn Segment>>
+    pub segments: Vec<ArcSegment>
 }
 
 impl MemLayout {
     pub fn new() -> Self {
+        verbose!("Initializing MemLayout...");
         let mut layout = Self {
             pagetable: PageTable::new(),
             segments: Vec::new()
@@ -155,18 +148,26 @@ impl MemLayout {
 
         let mut to_clear = Vec::new();
         for seg in self.segments.iter() {
-            let start_vpn = seg.start_vpn();
-            if !basic.contains(&start_vpn) {
-                to_clear.push(start_vpn);
+            verbose!("reset checking {:?}...", seg);
+            let mut important = false;
+            for addr in basic.iter() {
+                if seg.contains(addr.to_owned()) {
+                    important = true;
+                    verbose!("{:?} is important for containing {:?}", seg, addr);
+                    break;
+                }
+            }
+            if !important {
+                to_clear.push(seg.clone());
             }
         }
-        for vpn in to_clear {
-            self.remove_segment(vpn)?;
+        for seg in to_clear {
+            self.remove_segment(seg)?;
         }
         Ok(())
     }
 
-    pub fn register_segment(&mut self, seg: Arc<dyn Segment>) {
+    pub fn register_segment(&mut self, seg: ArcSegment) {
         self.segments.push(seg);
     }
 
@@ -198,11 +199,11 @@ impl MemLayout {
         if satp::read().mode() != satp::Mode::Sv39 {
             fatal!("Failed switch to SV39!");
         } else {
-            info!("Kernel virtual memory layout has been activated.");
+            info!("Kernel virtual memory layout has been activated on core {}.", get_hart_id());
         }
     }
 
-    fn occupied(&self, vpn: VirtPageNum) -> bool {
+    pub fn occupied(&self, vpn: VirtPageNum) -> bool {
         self.pagetable.walk_find(vpn).is_some()
     }
 
@@ -228,31 +229,46 @@ impl MemLayout {
         Err(ErrorNum::ENOMEM)
     }
 
-    pub fn get_segment(&self, start_vpn: VirtPageNum) -> Result<Arc<dyn Segment>, ErrorNum> {
+    pub fn get_segment(&self, vpn: VirtPageNum) -> Result<ArcSegment, ErrorNum> {
         for seg in self.segments.iter() {
-            if seg.start_vpn() == start_vpn {
+            if seg.contains(vpn) {
                 return Ok(seg.clone());
             }
         }
         return Err(ErrorNum::ENOSEG);
     }
 
-    pub fn unmap_segment(&mut self, start_vpn: VirtPageNum) -> Result<(), ErrorNum> {
-        let seg = self.get_segment(start_vpn)?;
+    pub fn unmap_segment_by_vpn(&mut self, vpn: VirtPageNum) -> Result<(), ErrorNum> {
+        let seg = self.get_segment(vpn)?;
         seg.do_unmap(&mut self.pagetable)?;
         Ok(())
     }
 
-    pub fn remove_segment(&mut self, start_vpn: VirtPageNum) -> Result<(), ErrorNum> {
-        self.unmap_segment(start_vpn)?;
-        self.segments.retain(|x| x.start_vpn() != start_vpn);
+    pub fn unmap_segment(&mut self, seg: &ArcSegment) -> Result<(), ErrorNum> {
+        seg.do_unmap(&mut self.pagetable)?;
         Ok(())
+    }
+
+    pub fn remove_segment_by_vpn(&mut self, vpn: VirtPageNum) -> Result<(), ErrorNum> {
+        self.unmap_segment_by_vpn(vpn)?;
+        self.segments.retain(|x| !x.contains(vpn));
+        Ok(())
+    }
+
+    pub fn remove_segment(&mut self, seg: ArcSegment) -> Result<(), ErrorNum> {
+        if self.segments.contains(&seg) {
+            self.unmap_segment(&seg)?;
+            self.segments.retain(|x| x.clone() != seg);
+            Ok(())
+        } else {
+            Err(ErrorNum::ENOSEG)
+        }
     }
 
     pub fn map_elf(&mut self, elf_file: Arc<dyn RegularFile>) -> Result<VirtAddr, ErrorNum> {
         verbose!("Mapping elf into memory space");
         // first map it for easy reading...
-        let first_map = elf_file.clone().register_mmap(self)?;
+        let first_map = elf_file.clone().register_mmap(self, 0, elf_file.stat()?.file_size)?;
         self.do_map();
         let stat = elf_file.stat()?;
 
@@ -295,12 +311,12 @@ impl MemLayout {
                 let dst = VirtAddr::from(seg_start).0 as *mut u8;
                 let len = p.filesz() as usize;
                 unsafe{core::ptr::copy_nonoverlapping(src, dst, len)}
-                segment.alter_permission(seg_flag, &mut self.pagetable);
+                segment.as_managed()?.alter_permission(seg_flag, &mut self.pagetable);
             }
         }
         let entry_point = elf.entry_point() as usize;
         // free the first mmap...
-        self.remove_segment(first_map)?;
+        self.remove_segment_by_vpn(first_map)?;
         Ok(entry_point.into())
     }
 

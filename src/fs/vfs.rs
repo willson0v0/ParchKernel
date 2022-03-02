@@ -57,8 +57,12 @@ pub struct Path {
 
 impl Debug for Path {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
+        write!(f, "/")?;
         for p in &self.components {
-            f.write_fmt(format_args!("/{}", p))?;
+            write!(f, "{}", p)?;
+            if self.components.last().unwrap() != p {
+                write!(f, "/")?;
+            }
         }
         Ok(())
     }

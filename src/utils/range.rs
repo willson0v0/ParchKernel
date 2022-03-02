@@ -21,6 +21,9 @@ impl <T> Range<T> where T: StepUp + StepDown + Copy + PartialEq + PartialOrd + D
     }
     pub fn start(&self) -> T {self.start}
     pub fn end(&self) -> T {self.end}
+    pub fn contains(&self, tgt: T) -> bool {
+        tgt >= self.start && tgt < self.end
+    }
 }
 
 pub struct RangeIterator<T> where T: StepUp + StepDown + Copy + PartialEq + PartialOrd + Debug {

@@ -63,6 +63,7 @@ pub struct PCBInner {
     pub children: BTreeSet<Arc<ProcessControlBlock>>,
     pub parent: Option<Weak<ProcessControlBlock>>,
     pub exit_code: Option<isize>,
+    pub cwd: Path,
     pub trace: bool
 }
 
@@ -90,51 +91,6 @@ impl ProcessControlBlock {
             pid: new_pid(),
             inner: SpinMutex::new("pcb lock", self.get_inner().fork()?)
         }))
-    }
-
-    pub fn exec(&self, elf_file: Arc<dyn RegularFile>, args: Vec<Vec<u8>>) -> Result<(), ErrorNum> {
-        verbose!("pcb exec");
-        let mut inner = self.get_inner();
-        assert!(inner.status == ProcessStatus::Running, "Exec on process that is not running");
-        inner.mem_layout.reset()?;
-        let entry = inner.mem_layout.map_elf(elf_file.clone())?;
-        inner.mem_layout.do_map();
-        verbose!("mem_layout done");
-        inner.elf_file = elf_file.clone();
-        inner.entry_point = entry;
-        inner.files = PCBInner::default_fds()?;
-        inner.trace = false;
-        inner.signal_contexts.clear();
-        inner.signal_handler = PCBInner::default_hander();
-        inner.signal_enable = PCBInner::defualt_mask();
-        inner.pending_signal.clear();
-        
-        push_sum_on();
-        // copy args into user stack
-        let mut ptr = PROC_U_STACK_ADDR + PROC_U_STACK_SIZE;
-        let mut argv = Vec::new();
-        for arg in args {
-            ptr = ptr - arg.len();
-            unsafe{ptr.write_data(arg)};
-            argv.push(ptr);
-        }
-        argv.push(0.into());
-        let argv_ptr = ptr - argv.len() * size_of::<VirtAddr>();
-        ptr = argv_ptr;
-        for arg_ptr in argv.iter() {
-            unsafe{ptr.write_volatile(arg_ptr)};
-            ptr = ptr + size_of::<VirtAddr>();
-        }
-        pop_sum_on();
-
-        let trap_context = TrapContext::current_ref();
-        *trap_context = TrapContext::new();
-        trap_context.a0 = argv.len() - 1;
-        trap_context.a1 = argv_ptr.0;
-        trap_context.sp = argv_ptr.0;
-        trap_context.epc = entry;
-
-        Ok(())
     }
 }
 
@@ -165,6 +121,7 @@ impl PCBInner {
             children: BTreeSet::new(),
             parent: None,
             exit_code: None,
+            cwd: Path::root(),
             pending_signal: VecDeque::new(),
         }
     }
@@ -269,6 +226,7 @@ impl PCBInner {
             children: BTreeSet::new(),
             parent: None,
             exit_code: None,
+            cwd: self.cwd.clone(),
             pending_signal: VecDeque::new(),    // clear pending signal
         })
     }
@@ -314,5 +272,48 @@ impl PCBInner {
     pub fn dup_file(&mut self, to_dup: FileDescriptor) -> Result<FileDescriptor, ErrorNum> {
         let to_dup = self.get_file(to_dup)?;
         self.register_file(to_dup)
+    }
+
+    pub fn exec(&mut self, elf_file: Arc<dyn RegularFile>, args: Vec<Vec<u8>>) -> Result<(), ErrorNum> {
+        assert!(self.status == ProcessStatus::Running, "Exec on process that is not running");
+        self.mem_layout.reset()?;
+        let entry = self.mem_layout.map_elf(elf_file.clone())?;
+        self.mem_layout.do_map();
+        verbose!("mem_layout done");
+        self.elf_file = elf_file.clone();
+        self.entry_point = entry;
+        self.files = Self::default_fds()?;
+        self.trace = false;
+        self.signal_contexts.clear();
+        self.signal_handler = Self::default_hander();
+        self.signal_enable = Self::defualt_mask();
+        self.pending_signal.clear();
+        
+        push_sum_on();
+        // copy args into user stack
+        let mut ptr = PROC_U_STACK_ADDR + PROC_U_STACK_SIZE;
+        let mut argv = Vec::new();
+        for arg in args {
+            ptr = ptr - arg.len();
+            unsafe{ptr.write_data(arg)};
+            argv.push(ptr);
+        }
+        argv.push(0.into());
+        let argv_ptr = ptr - argv.len() * size_of::<VirtAddr>();
+        ptr = argv_ptr;
+        for arg_ptr in argv.iter() {
+            unsafe{ptr.write_volatile(arg_ptr)};
+            ptr = ptr + size_of::<VirtAddr>();
+        }
+        pop_sum_on();
+
+        let trap_context = TrapContext::current_ref();
+        *trap_context = TrapContext::new();
+        trap_context.a0 = argv.len() - 1;
+        trap_context.a1 = argv_ptr.0;
+        trap_context.sp = argv_ptr.0;
+        trap_context.epc = entry;
+
+        Ok(())
     }
 }

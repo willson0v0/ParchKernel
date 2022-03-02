@@ -172,9 +172,7 @@ impl Uart {
     /// kernel will use this to send output
     pub fn write_synced(&self, data: &str) {
         // prevent trap get inner deadlocked
-        push_intr_off();
         self.inner.acquire().write_synced(data);
-        pop_intr_off();
     }
 
     /// Read from UART

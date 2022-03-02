@@ -29,7 +29,8 @@ pub use processor::{
     push_sum_on,
     pop_sum_on,
     get_processor,
-    get_hart_id
+    get_hart_id,
+    PROCESSOR_MANAGER
 };
 
 use lazy_static::*;
@@ -39,8 +40,10 @@ lazy_static!{
 
 pub fn init() {
     enqueue(INIT_PROCESS.clone());
+    milestone!("Init_process initialzed and enqueued for execution.");
 }
 
 pub fn hart_init() {
+    milestone!("Starting scheduler on hart {}...", get_hart_id());
     get_processor().run();
 }

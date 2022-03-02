@@ -21,6 +21,7 @@ elf_rs = "0.2.0"
 
 [build-dependencies]
 chrono = "0.4"
+csv = "1.1.6"
 
 [features]
 log_fatal       = [                 ]

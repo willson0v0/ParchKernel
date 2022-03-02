@@ -9,8 +9,7 @@ mod segment;
 pub use phys_bitmap::BitMap;
 
 pub use mem_layout::{
-    MemLayout,
-    SCHEDULER_MEM_LAYOUT
+    MemLayout
 };
 
 pub use kernel_heap::{init_kernel_heap};
@@ -38,6 +37,7 @@ pub use page_allocator::{
 
 pub use segment::{
     Segment,
+    ArcSegment,
     IdenticalMappingSegment,
     ManagedSegment,
     VMASegment,
@@ -54,7 +54,7 @@ pub use pagetable::{
     PTEFlags
 };
 
-use crate::utils::{Mutex};
+use crate::{utils::{Mutex}, process::get_processor};
 
 pub fn init() {
     init_kernel_heap();
@@ -65,11 +65,16 @@ pub fn init() {
     }
     info!("SBSS: {:x}", sbss as usize);
     info!("EBSS: {:x}", ebss as usize);
-    // for i in PARange::new((sbss as usize).into(), (ebss as usize).into()) {
-    //     unsafe{ i.write_volatile(&0u8); }
+
+    // unsafe{ 
+    //     let clear_start = sbss as usize as *mut u8;
+    //     let length = ebss as usize - sbss as usize;
+    //     core::ptr::write_bytes(clear_start, 0, length); 
     // }
+    
+    milestone!("Memory initialized.");
 }
 
 pub fn hart_init() {
-    SCHEDULER_MEM_LAYOUT.acquire().activate();
+    get_processor().activate_mem_layout();
 }

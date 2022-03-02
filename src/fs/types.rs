@@ -16,6 +16,7 @@ pub struct FileStat {
     pub path        : Path,
     pub inode       : u32,
     pub fs          : Weak<dyn VirtualFileSystem>,
+    // TODO: uid/gid/times
 }
 
 #[derive(Debug, Clone)]
@@ -86,7 +87,7 @@ pub trait SocketFile    : File {}
 pub trait LinkFile      : File {}
 pub trait RegularFile   : File {
     fn get_page(&self, offset: usize) -> Result<PageGuard, ErrorNum>;
-    fn register_mmap(self: Arc<Self>, mem_layout: &mut MemLayout) -> Result<VirtPageNum, ErrorNum>;
+    fn register_mmap(self: Arc<Self>, mem_layout: &mut MemLayout, offset: usize, length: usize) -> Result<VirtPageNum, ErrorNum>;
 }
 pub trait BlockFile     : File {}
 pub trait DirFile       : File {

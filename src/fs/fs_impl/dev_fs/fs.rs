@@ -7,7 +7,11 @@ use lazy_static::*;
 use super::UartPTS;
 
 lazy_static!{
-    pub static ref DEV_FS: Arc<DevFS> = Arc::new(DevFS());
+    pub static ref DEV_FS: Arc<DevFS> = {
+        let res = Arc::new(DevFS());
+        milestone!("DevFS initialized.");
+        res
+    };
 }
 
 pub struct DevFS();

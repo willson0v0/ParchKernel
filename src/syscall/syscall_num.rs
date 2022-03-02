@@ -1,0 +1,16 @@
+pub const SYSCALL_WRITE     : usize =   0;
+pub const SYSCALL_READ      : usize =   1;
+pub const SYSCALL_OPEN      : usize =   2;
+pub const SYSCALL_OPENAT    : usize =   3;
+pub const SYSCALL_CLOSE     : usize =   4;
+pub const SYSCALL_DUP       : usize =   5;
+pub const SYSCALL_FORK      : usize =   6;
+pub const SYSCALL_EXEC      : usize =   7;
+pub const SYSCALL_EXIT      : usize =   8;
+pub const SYSCALL_MMAP      : usize =   9;
+pub const SYSCALL_SIGNAL    : usize =  10;
+pub const SYSCALL_WAITPID   : usize =  11;
+pub const SYSCALL_SIGACTION : usize =  12;
+pub const SYSCALL_SIGRETURN : usize =  13;
+pub const SYSCALL_GETCWD    : usize =  14;
+pub const SYSCALL_CHDIR     : usize =  15;

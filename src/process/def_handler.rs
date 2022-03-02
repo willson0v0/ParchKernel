@@ -1,5 +1,5 @@
 use core::arch::asm;
-use crate::{syscall::SYSCALL_EXIT, config::U_TRAMPOLINE_ADDR};
+use crate::{syscall::syscall_num::SYSCALL_EXIT, config::U_TRAMPOLINE_ADDR};
 
 #[no_mangle]
 #[link_section = ".text.u_trampoline_rust"]

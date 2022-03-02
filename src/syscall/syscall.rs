@@ -1,55 +1,8 @@
 use alloc::{vec::Vec, sync::Arc};
 
-use crate::{process::{FileDescriptor, get_processor, push_sum_on, pop_sum_on, enqueue, ProcessControlBlock, ProcessStatus, ProcessID, get_process, SignalNum, free_current}, mem::{VirtAddr, VMASegment, SegmentFlags}, utils::ErrorNum, fs::{Path, open, OpenMode}, interrupt::trap_context::TrapContext};
+use crate::{process::{FileDescriptor, get_processor, push_sum_on, pop_sum_on, enqueue, ProcessControlBlock, ProcessStatus, ProcessID, get_process, SignalNum, free_current}, mem::{VirtAddr, VMASegment, SegmentFlags, ManagedSegment, VPNRange}, utils::ErrorNum, fs::{Path, open, OpenMode}, interrupt::trap_context::TrapContext};
 
-pub const SYSCALL_WRITE     : usize =  0;
-pub const SYSCALL_READ      : usize =  1;
-pub const SYSCALL_OPEN      : usize =  2;
-pub const SYSCALL_OPENAT    : usize =  3;
-pub const SYSCALL_CLOSE     : usize =  4;
-pub const SYSCALL_DUP       : usize =  5;
-pub const SYSCALL_FORK      : usize =  6;
-pub const SYSCALL_EXEC      : usize =  7;
-pub const SYSCALL_EXIT      : usize =  8;
-pub const SYSCALL_MMAP      : usize =  9;
-pub const SYSCALL_SIGNAL    : usize = 10;
-pub const SYSCALL_WAITPID   : usize = 11;
-pub const SYSCALL_SIGACTION : usize = 12;
-pub const SYSCALL_SIGRETURN : usize = 13;
-
-macro_rules! CALL_SYSCALL {
-    ( $syscall_name: expr ) => {
-        {
-            let process = crate::process::get_processor().current().unwrap();
-            let do_trace = process.get_inner().trace;
-            if do_trace {
-                debug!("/========== SYSCALL {} CALLED BY {:?} ==========\\", stringify!($syscall_name), process.pid);
-            }
-            let ret = $syscall_name();
-            if do_trace {
-                debug!("\\= SYSCALL {} CALLED BY {} RESULT {:<10?} =/", stringify!($syscall_name), process.pid, ret);
-            }
-            ret
-        }
-    };
-    ( $syscall_name: expr, $($y:expr),+ ) => {
-        {
-            let process = crate::process::get_processor().current().unwrap();
-            let do_trace = process.get_inner().trace;
-            if do_trace {
-                debug!("SYSCALL {} CALLED BY {:?}", stringify!($syscall_name), process.pid);
-                $(
-                    verbose!("{:>25} = {:?}", stringify!{$y}, $y);
-                )+
-            }
-            let ret = $syscall_name($($y),+);
-            if do_trace {
-                debug!("SYSCALL {} CALLED BY {:?} RESULT {:?}", stringify!($syscall_name), process.pid, ret);
-            }
-            ret
-        }
-    };
-}
+use super::{syscall_num::*, types::{self, MMAPProt, MMAPFlag}};
 
 pub fn syscall(syscall_id: usize, args: [usize; 6]) -> Result<usize, ErrorNum> {
     match syscall_id {
@@ -62,11 +15,13 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> Result<usize, ErrorNum> {
         SYSCALL_FORK        => CALL_SYSCALL!(sys_fork       ),
         SYSCALL_EXEC        => CALL_SYSCALL!(sys_exec       , VirtAddr::from(args[0]), VirtAddr::from(args[1])),
         SYSCALL_EXIT        => CALL_SYSCALL!(sys_exit       , args[0] as isize),
-        SYSCALL_MMAP        => CALL_SYSCALL!(sys_mmap       , FileDescriptor::from(args[0]), SegmentFlags::from_bits_truncate(args[1])),
+        SYSCALL_MMAP        => CALL_SYSCALL!(sys_mmap       , VirtAddr::from(args[0]), args[1], MMAPProt::from_bits(args[2]).ok_or(ErrorNum::EINVAL)?, MMAPFlag::from_bits(args[3]).ok_or(ErrorNum::EINVAL)?, FileDescriptor::from(args[4]), args[5]),
         SYSCALL_WAITPID     => CALL_SYSCALL!(sys_waitpid    , args[0] as isize, VirtAddr::from(args[1])),
         SYSCALL_SIGNAL      => CALL_SYSCALL!(sys_signal     , ProcessID(args[0]), args[1]),
         SYSCALL_SIGACTION   => CALL_SYSCALL!(sys_sigaction  , args[0], VirtAddr::from(args[1])),
         SYSCALL_SIGRETURN   => CALL_SYSCALL!(sys_sigreturn  ),
+        SYSCALL_GETCWD      => CALL_SYSCALL!(sys_getcwd     , VirtAddr::from(args[0]), args[1]),
+        SYSCALL_CHDIR       => CALL_SYSCALL!(sys_chdir      , VirtAddr::from(args[0])),
         _ => CALL_SYSCALL!(sys_unknown, syscall_id)
     }
 }
@@ -99,8 +54,12 @@ pub fn sys_open(path: VirtAddr, open_mode: usize) -> Result<usize, ErrorNum> {
     let proc = get_processor().current().unwrap();
     let mut proc_inner = proc.get_inner();
     let open_mode = OpenMode::from_bits_truncate(open_mode);
-    let (path, _) = path.read_cstr()?;
-    let path: Path = path.into();
+    let path = path.read_cstr()?.0;
+    let path: Path = if path.starts_with('/') {
+        path.into()
+    } else {
+        proc_inner.cwd.concat(&path.into())
+    };
     let file = open(&path, open_mode)?;
     Ok(proc_inner.register_file(file)?.0)
 }
@@ -143,7 +102,14 @@ pub fn sys_fork() -> Result<usize, ErrorNum> {
 }
 
 pub fn sys_exec(elf_path: VirtAddr, argv: VirtAddr) -> Result<usize, ErrorNum> {
-    let path: Path = elf_path.read_cstr()?.0.into();
+    let proc = get_processor().current().unwrap();
+    let mut proc_inner = proc.get_inner();
+    let path = elf_path.read_cstr()?.0;
+    let path: Path = if path.starts_with('/') {
+        path.into()
+    } else {
+        proc_inner.cwd.concat(&path.into())
+    };
     let mut args: Vec<Vec<u8>> = Vec::new();
     let mut p = argv;
     if p.0 != 0 {
@@ -157,10 +123,9 @@ pub fn sys_exec(elf_path: VirtAddr, argv: VirtAddr) -> Result<usize, ErrorNum> {
             args.push(bytes);
         }
     }
-    let proc = get_processor().current().unwrap();
     debug!("proc {} exec {:?}", proc.pid, path);
     let elf_file = open(&path, OpenMode::SYS)?.as_regular()?;
-    proc.exec(elf_file, args)?;
+    proc_inner.exec(elf_file, args)?;
     Ok(0)
 }
 
@@ -171,25 +136,57 @@ pub fn sys_exit(exit_code: isize) -> Result<usize, ErrorNum> {
     unreachable!("This part should be unreachable. Go check __switch.")
 }
 
-pub fn sys_mmap(fd: FileDescriptor, flag: SegmentFlags) -> Result<usize, ErrorNum> {
+pub fn sys_mmap(tgt_addr: VirtAddr, length: usize, prot: MMAPProt, flag: MMAPFlag, fd: FileDescriptor, offset: usize) -> Result<usize, ErrorNum> {
     let proc = get_processor().current().unwrap();
     let mut proc_inner = proc.get_inner();
-    let file = proc_inner.get_file(fd)?.as_regular()?;
-    let stat = file.stat()?;
-    if flag.contains(SegmentFlags::W) && !stat.open_mode.contains(OpenMode::WRITE) {
-        return Err(ErrorNum::EPERM);
+    
+    let tgt_pos: VirtAddr = if flag.contains(MMAPFlag::FIXED) {
+        for i in VPNRange::new(tgt_addr.into(), (tgt_addr+length).to_vpn_ceil()) {
+            if proc_inner.mem_layout.occupied(i) {
+                return Err(ErrorNum::EADDRINUSE);
+            }
+        }
+        tgt_addr
+    } else {
+        proc_inner.mem_layout.get_space(length)?.into()
+    };
+
+    if flag.contains(MMAPFlag::ANONYMOUS) {
+        if fd != FileDescriptor::from(usize::MAX) {
+            return Err(ErrorNum::EINVAL);
+        }
+        
+        proc_inner.mem_layout.register_segment(ManagedSegment::new(VPNRange::new(
+            tgt_pos.into(), (tgt_pos+length).to_vpn_ceil().into()), 
+            prot.into(), 
+            None
+        ));
+        proc_inner.mem_layout.do_map();
+        Ok(VirtAddr::from(tgt_pos).0)
+
+    } else {
+        let mmap_file = proc_inner.get_file(fd)?.as_regular()?;
+        let stat = mmap_file.stat()?;
+        if length > stat.file_size {
+            return Err(ErrorNum::EOOR)
+        }
+        let seg_flag: SegmentFlags = prot.into();
+        if seg_flag.contains(SegmentFlags::W) && !stat.open_mode.contains(OpenMode::WRITE) {
+            return Err(ErrorNum::EPERM);
+        }
+        if seg_flag.contains(SegmentFlags::X) && !stat.open_mode.contains(OpenMode::EXEC) {
+            return Err(ErrorNum::EPERM);
+        }
+        proc_inner.mem_layout.register_segment(VMASegment::new_at(
+            tgt_pos.into(),
+            mmap_file,
+            seg_flag,
+            offset,
+            length
+        )?);
+        proc_inner.mem_layout.do_map();
+        Ok(VirtAddr::from(tgt_pos).0)
     }
-    if flag.contains(SegmentFlags::X) && !stat.open_mode.contains(OpenMode::EXEC) {
-        return Err(ErrorNum::EPERM);
-    }
-    let tgt_pos = proc_inner.mem_layout.get_space(stat.file_size)?;
-    proc_inner.mem_layout.register_segment(VMASegment::new_at(
-        tgt_pos,
-        file,
-        flag
-    ));
-    proc_inner.mem_layout.do_map();
-    Ok(VirtAddr::from(tgt_pos).0)
 }
 
 pub fn sys_waitpid(pid: isize, exit_code: VirtAddr) -> Result<usize, ErrorNum> {
@@ -255,6 +252,36 @@ pub fn sys_sigreturn() -> Result<usize, ErrorNum> {
         error!("sys_sigreturn called when no signal context was saved");
         Err(ErrorNum::ENOSIG)
     }
+}
+
+pub fn sys_getcwd(buf: VirtAddr, length: usize) -> Result<usize, ErrorNum> {
+    let proc = get_processor().current().unwrap();
+    let proc_inner = proc.get_inner();
+    let path = format!("{:?}", proc_inner.cwd);
+    let mut path = path.into_bytes();
+    // additional 1 byte for \0
+    if path.len() >= length-1 {
+        path = path[..length-1].to_vec();
+    }
+    path.push(0);
+    push_sum_on();
+    unsafe{buf.write_data(path);}
+    pop_sum_on();
+    Ok(buf.0)
+}
+
+pub fn sys_chdir(buf: VirtAddr) -> Result<usize, ErrorNum> {
+    let proc = get_processor().current().unwrap();
+    let mut proc_inner = proc.get_inner();
+    let path = buf.read_cstr()?.0;
+    let path: Path = if path.starts_with('/') {
+        path.into()
+    } else {
+        proc_inner.cwd.concat(&path.into())
+    };
+    open(&path, OpenMode::SYS)?.as_dir()?; // check if it's actually a dir
+    proc_inner.cwd = path;
+    Ok(0)
 }
 
 pub fn sys_unknown(syscall_id:usize) -> Result<usize, ErrorNum> {

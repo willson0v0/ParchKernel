@@ -16,6 +16,7 @@ extern "C" {
 
 lazy_static!{
 	static ref PAGE_ALLOCATOR: SpinMutex<BitMapPageAllocator> = {
+		verbose!("Initializing page allocator.");
 		SpinMutex::new(
 			"PageAllocator", 
 			BitMapPageAllocator::new(

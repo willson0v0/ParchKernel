@@ -18,6 +18,7 @@ pub fn init_kernel_heap() {
     unsafe {
         KERNEL_HEAP_ALLOCATOR.lock().init(HEAP_SPACE.as_ptr() as usize, KERNEL_HEAP_SIZE);
     }
+    verbose!("kernel heap initialzed, size = {}", KERNEL_HEAP_SIZE);
 }
 
 /// Alloc error handler

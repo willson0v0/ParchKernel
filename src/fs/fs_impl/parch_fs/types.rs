@@ -1,5 +1,5 @@
-use crate::{mem::{PhysAddr, VMASegment}, utils::{SpinMutex, Mutex, ErrorNum}, fs::{RegularFile, File, BlockFile, DirFile, OpenMode, types::{FileType, Permission, Dirent}}};
-use super::{DIRECT_BLK_COUNT, INODE_SIZE, DENTRY_NAME_LEN, DENTRY_SIZE, fs::{ParchFS}, PFSBase, BAD_BLOCK, BAD_INODE};
+use crate::{mem::{PhysAddr, VMASegment}, utils::{SpinMutex, Mutex, ErrorNum, time::get_real_time_epoch}, fs::{RegularFile, File, BlockFile, DirFile, OpenMode, types::{FileType, Permission, Dirent}}, config::PAGE_SIZE};
+use super::{DIRECT_BLK_COUNT, INODE_SIZE, DENTRY_NAME_LEN, DENTRY_SIZE, fs::{ParchFS}, PFSBase, BAD_BLOCK, BAD_INODE, BLK_SIZE};
 
 use core::mem::size_of;
 use core::slice::from_raw_parts;
@@ -253,10 +253,17 @@ impl File for PFSRegular {
 
 impl RegularFile for PFSRegular {
     fn get_page(&self, offset: usize) -> Result<crate::mem::PageGuard, crate::utils::ErrorNum> {
-        self.0.acquire().base.get_page(offset)
+        if offset % PAGE_SIZE != 0 {
+            Err(ErrorNum::ENOTALIGNED)
+        } else {
+            self.0.acquire().base.get_page(offset)
+        }
     }
 
-    fn register_mmap(self: Arc<Self>, mem_layout: &mut crate::mem::MemLayout) -> Result<crate::mem::VirtPageNum, ErrorNum> {
+    fn register_mmap(self: Arc<Self>, mem_layout: &mut crate::mem::MemLayout, offset: usize, length: usize) -> Result<crate::mem::VirtPageNum, ErrorNum> {
+        if offset % PAGE_SIZE != 0 {
+            return Err(ErrorNum::ENOTALIGNED);
+        }
         let mut inner = self.0.acquire();
         if let Some(start_vpn) = inner.base.mmap_start {
             return Ok(start_vpn);   
@@ -266,8 +273,10 @@ impl RegularFile for PFSRegular {
         mem_layout.register_segment(VMASegment::new_at(
             start_vpn,
             self.clone(),
-            stat.open_mode.into()
-        ));
+            stat.open_mode.into(),
+            offset,
+            length
+        )?);
         inner.base.mmap_start = Some(start_vpn);
         Ok(start_vpn)
     }
@@ -409,6 +418,9 @@ impl DirFile for PFSDir {
                 )?;
                 let f_type = base.f_type()?;
                 if rel_path.len() == 1 {
+                    let inode = inner.base.fs.upgrade().unwrap().get_inode(e.inode.into())?;
+                    let mut inode_inner = inode.acquire();
+                    inode_inner.access_time = get_real_time_epoch();
                     let res: Arc<dyn File> = match f_type {
                         FileType::REGULAR => {
                             Arc::new(PFSRegular(SpinMutex::new("PFSFile lock", PFSRegularInner{base})))
@@ -473,9 +485,9 @@ impl DirFile for PFSDir {
         inode.indirect_blk = BAD_BLOCK;
         inode.indirect_blk2 = BAD_BLOCK;
         inode.f_size = 0;
-        inode.access_time = 0xbeef;
-        inode.change_time = 0xbeef;
-        inode.create_time = 0xbeef;
+        inode.access_time = get_real_time_epoch();
+        inode.change_time = get_real_time_epoch();
+        inode.create_time = get_real_time_epoch();
 
         let bytes: Vec<u8> = name.bytes().collect();
         let mut f_name: [u8; DENTRY_NAME_LEN] = [0; DENTRY_NAME_LEN];

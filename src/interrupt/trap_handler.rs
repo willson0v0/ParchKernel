@@ -27,6 +27,7 @@ pub fn kernel_trap() {
     let scause = scause::read();
     let stval = stval::read();
     let sstatus = sstatus::read();
+    let sepc = sepc::read();
 
     assert!(sstatus.spp() == SPP::Supervisor, "kerneltrap not from supervisor mode");
     assert!(!sstatus.sie(), "kernel interrupt is enabled");
@@ -88,7 +89,7 @@ pub fn kernel_trap() {
                 }
             }
             fatal!("STVAL: {:x}", stval);
-            fatal!("SEPC : {:x}", sepc::read());
+            fatal!("SEPC : {:x}", sepc);
             panic!("Kernel panic");
         }
     }

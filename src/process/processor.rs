@@ -10,7 +10,7 @@ use alloc::vec::Vec;
 use lazy_static::*;
 use crate::config::{MAX_CPUS, PROC_K_STACK_ADDR, PROC_K_STACK_SIZE};
 use crate::interrupt::trap_return;
-use crate::mem::{SCHEDULER_MEM_LAYOUT};
+use crate::mem::{MemLayout};
 use crate::process::ProcessControlBlock;
 use crate::process::pcb::ProcessStatus;
 use crate::utils::{Mutex};
@@ -90,7 +90,8 @@ pub struct ProcessorInner {
     pub int_off_count: usize,    // depth of push_off nesting
     pub int_enable_b4_off: bool,        // was interrupt enabled before push_off
     pub sum_count: usize,
-    pub idle_context: ProcessContext
+    pub idle_context: ProcessContext,
+    pub sche_mem_layout: Option<MemLayout>
 }
 
 impl Processor {
@@ -149,7 +150,7 @@ impl Processor {
                 let proc_context = pcb_inner.context_ptr();
                 let idle_context = self.context_ptr();
                 let proc_satp = pcb_inner.mem_layout.pagetable.satp(Some(proc.pid));
-                let scheuler_satp = SCHEDULER_MEM_LAYOUT.acquire().pagetable.satp(None);
+                let scheuler_satp = self.inner.borrow().sche_mem_layout.as_ref().unwrap().pagetable.satp(None);
                 drop(pcb_inner);
                 self.inner.borrow_mut().pcb = Some(proc);
                 unsafe {
@@ -160,9 +161,15 @@ impl Processor {
                     asm!("sfence.vma");
                 }
             } else {
-                warning!("No available process. Processor IDLE.")
+                verbose!("No available process. Processor IDLE.");
+                self.stall();
             }
         }
+    }
+
+    pub fn stall(&self) {
+        assert!(sstatus::read().sie(), "Interrupt disabled.");
+        unsafe { asm!("wfi") };
     }
     
     pub fn suspend_switch(&self) {
@@ -204,6 +211,15 @@ impl Processor {
             __swtch(proc_ctx_ptr, idle_context);
         }
     }
+
+    pub fn activate_mem_layout(&self) {
+        info!("Activating mem layout for hart {}", get_hart_id());
+        assert!(self.inner.borrow().sche_mem_layout.is_none(), "hart mem layout already initialized.");
+        let new_mem_layout = MemLayout::new();
+        new_mem_layout.activate();
+        self.inner.borrow_mut().sche_mem_layout = Some(new_mem_layout);
+        milestone!("Hart {} scheduler memory layout activated.", get_hart_id());
+    }
 }
 
 impl ProcessorInner {
@@ -213,7 +229,8 @@ impl ProcessorInner {
             int_off_count: 0,
             int_enable_b4_off: false,
             sum_count: 0,
-            idle_context: ProcessContext::new()
+            idle_context: ProcessContext::new(),
+            sche_mem_layout: None
         }
     }
 

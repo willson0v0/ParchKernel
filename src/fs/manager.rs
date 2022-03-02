@@ -31,7 +31,8 @@ impl MountManagerInner {
         if self.fs.contains_key(&path) {
             Err(ErrorNum::EADDRINUSE)
         } else {
-            assert!(self.fs.insert(path, vfs).is_none(), "mount on used mounting point");
+            assert!(self.fs.insert(path.clone(), vfs.clone()).is_none(), "mount on used mounting point");
+            milestone!("{:?} has been mounted on {:?}.", vfs, path);
             Ok(())
         }
     }
@@ -45,6 +46,7 @@ impl MountManagerInner {
                 // strong fs reference in to_remove and in self.fs
                 // weak fs reference in i dunno maybe files? this varies between fs
                 if Arc::strong_count(&to_remove) == 2 && Arc::weak_count(&to_remove) == 0 {
+                    warning!("{:?} on {:?} is to unmount.", to_remove, path);
                     Ok(self.fs.remove(&path).unwrap())
                 } else {
                     Err(ErrorNum::EBUSY)

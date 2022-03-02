@@ -41,31 +41,25 @@ pub struct SpinMutex<T> {
     is_acquired  : AtomicBool,
     name        : String,
     data        : UnsafeCell<T>,
-    acquired_by : RefCell<Option<usize>>,
-    did_push_off : RefCell<bool>
+    did_push_off : UnsafeCell<bool>
 }
 
 impl<T> SpinMutex<T> {
     pub fn new(name: &str, data: T) -> Self {
         Self {
             is_acquired: AtomicBool::new(false),
-            acquired_by: RefCell::new(None),
             name: String::from(name),
             data: UnsafeCell::new(data),
-            did_push_off: RefCell::new(true)
+            did_push_off: UnsafeCell::new(true)
         }
     }
     
     pub fn acquire_no_off(&self) -> MutexGuard<'_, T> {
-        if self.is_acquired.load(Ordering::Relaxed) && self.acquired_by.borrow().unwrap() == get_hart_id() {
-            panic!("Acquiring acquired lock")
-        }
-        while !self.is_acquired.swap(true, Ordering::AcqRel) {
+        while self.is_acquired.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
             // spin wait
         }
         // change after lock has been successfully acquired, thus refcell is safe to change
-        *self.acquired_by.borrow_mut() = Some(get_hart_id());
-        *self.did_push_off.borrow_mut() = false;
+        unsafe{*self.did_push_off.get() = false;}
         MutexGuard{mutex: self}
     }
 }
@@ -73,21 +67,17 @@ impl<T> SpinMutex<T> {
 impl<T> Mutex<T> for SpinMutex<T> {
     fn acquire(&self) -> MutexGuard<'_, T> {
         push_intr_off();
-        if self.is_acquired.load(Ordering::Relaxed) && self.acquired_by.borrow().unwrap() == get_hart_id() {
-            panic!("Acquiring acquired lock")
-        }
-        while !self.is_acquired.swap(true, Ordering::AcqRel) {
+        while self.is_acquired.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
             // spin wait
         }
         // change after lock has been successfully acquired, thus refcell is safe to change
-        *self.acquired_by.borrow_mut() = Some(get_hart_id());
-        *self.did_push_off.borrow_mut() = true;
+        unsafe{*self.did_push_off.get() = true;}
         MutexGuard{mutex: self}
     }
 
     fn release(&self) {
         self.is_acquired.store(false, Ordering::Release);
-        if *self.did_push_off.borrow() {
+        if unsafe{*self.did_push_off.get()} {
             pop_intr_off();
         }
     }
@@ -123,7 +113,7 @@ impl<T> SleepMutex<T> {
 impl<T> Mutex<T> for SleepMutex<T> {
     fn acquire(&self) -> MutexGuard<'_, T> {
         // TODO: Check if is Scheduler Kernel thread for Proc is acquiring SleepMutex. Scheduler kernel thread is not allowed to use this.
-        while !self.is_acquired.swap(true, Ordering::AcqRel) {
+        while !self.is_acquired.swap(true, Ordering::SeqCst) {
             get_processor().suspend_switch();
         }
         // change after lock has been successfully acquired, thus refcell is safe to change

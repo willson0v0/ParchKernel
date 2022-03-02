@@ -1,5 +1,7 @@
 use core::fmt::{self, Debug, Formatter};
 
+use core::cmp::min;
+use core::ops::{Deref, DerefMut};
 use alloc::{sync::{Arc}, collections::BTreeMap, vec::Vec, borrow::ToOwned};
 use bitflags::*;
 use crate::{config::{PAGE_SIZE, PROC_K_STACK_SIZE, PROC_K_STACK_ADDR, PROC_U_STACK_SIZE, PROC_U_STACK_ADDR}, utils::{SpinMutex, Mutex}};
@@ -55,8 +57,75 @@ pub trait Segment: Debug + Send + Sync {
     fn do_unmap(&self, pagetable: &mut PageTable) -> Result<(), ErrorNum>;
     fn status(&self) -> SegmentStatus;
     fn seg_type(&self) -> SegmentType;
-    fn start_vpn(&self) -> VirtPageNum;
-    fn clone_seg(self: Arc<Self>) -> Result<Arc<dyn Segment>, ErrorNum>;
+    fn contains(&self, vpn: VirtPageNum) -> bool;
+    fn clone_seg(self: Arc<Self>) -> Result<ArcSegment, ErrorNum>;
+}
+
+pub struct ArcSegment(pub Arc<dyn Segment>);
+
+/// All of these ArcSegment hassle, just to have PartialEq and Vec::contains... smh
+impl PartialEq for ArcSegment {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+// no explicit Deref, use delegate functions instead.
+// impl Deref for ArcSegment {
+//     type Target = dyn Segment;
+
+//     fn deref(&self) -> &Self::Target {
+//         self.0.deref()
+//     }
+// }
+
+impl From<Arc<dyn Segment>> for ArcSegment {
+    fn from(s: Arc<dyn Segment>) -> Self {
+        Self(s)
+    }
+}
+
+impl Clone for ArcSegment {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
+impl Debug for ArcSegment {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+// delegate functions.
+impl ArcSegment {
+    pub fn as_identical<'a>(self) -> Result<Arc<IdenticalMappingSegment>, ErrorNum> where Self: 'a {
+        self.0.as_identical()
+    }
+    pub fn as_managed<'a>(self) -> Result<Arc<ManagedSegment>, ErrorNum> where Self: 'a{
+        self.0.as_managed()
+    }
+    pub fn as_vma<'a>(self) -> Result<Arc<VMASegment>, ErrorNum> where Self: 'a{
+        self.0.as_vma()
+    }
+    pub fn do_map(&self, pagetable: &mut PageTable) -> Result<(), ErrorNum>{
+        self.0.do_map(pagetable)
+    }
+    pub fn do_unmap(&self, pagetable: &mut PageTable) -> Result<(), ErrorNum>{
+        self.0.do_unmap(pagetable)
+    }
+    pub fn status(&self) -> SegmentStatus{
+        self.0.status()
+    }
+    pub fn seg_type(&self) -> SegmentType{
+        self.0.seg_type()
+    }
+    pub fn contains(&self, vpn: VirtPageNum) -> bool{
+        self.0.contains(vpn)
+    }
+    pub fn clone_seg(&self) -> Result<ArcSegment, ErrorNum>{
+        self.0.clone().clone_seg()
+    }
 }
 
 pub struct IdenticalMappingSegment (SpinMutex<IdenticalMappingSegmentInner>);
@@ -82,7 +151,9 @@ pub struct VMASegmentInner {
     file: Arc<dyn RegularFile>,
     flag: SegmentFlags,
     status: SegmentStatus,
-    start_vpn: VirtPageNum
+    start_vpn: VirtPageNum,
+    file_offset: usize,  /* file_offset in page */
+    length: usize,  /* length in page */
 }
 
 pub struct TrampolineSegment (SpinMutex<TrampolineSegmentInner>);
@@ -204,6 +275,8 @@ impl Segment for IdenticalMappingSegment {
     }
 
     fn do_unmap(&self, _pagetable: &mut PageTable) -> Result<(), ErrorNum> {
+        let inner = self.0.acquire();
+        if inner.range.start() == inner.range.end() {return Ok(())}
         panic!("Parch don't unmap identitical mapping segment");
     }
 
@@ -215,11 +288,11 @@ impl Segment for IdenticalMappingSegment {
         SegmentType::Identical
     }
 
-    fn start_vpn(&self) -> VirtPageNum {
-        self.0.acquire().range.start()
+    fn contains(&self, vpn: VirtPageNum) -> bool {
+        self.0.acquire().range.contains(vpn)
     }
 
-    fn clone_seg(self: Arc<Self>) -> Result<Arc<dyn Segment>, ErrorNum> {
+    fn clone_seg(self: Arc<Self>) -> Result<ArcSegment, ErrorNum> {
         let inner = self.0.acquire();
         Ok(Self::new(inner.range, inner.flag))
     }
@@ -283,11 +356,11 @@ impl Segment for ManagedSegment {
         SegmentType::Managed
     }
 
-    fn start_vpn(&self) -> VirtPageNum {
-        self.0.acquire().range.start()
+    fn contains(&self, vpn: VirtPageNum) -> bool {
+        self.0.acquire().frames.keys().any(|&x| x == vpn)
     }
 
-    fn clone_seg(self: Arc<Self>) -> Result<Arc<dyn Segment>, ErrorNum> {
+    fn clone_seg(self: Arc<Self>) -> Result<ArcSegment, ErrorNum> {
         let inner = self.0.acquire();
         Ok(Self::new(inner.range, inner.flag, Some(self.clone())))
     }
@@ -319,8 +392,9 @@ impl Segment for VMASegment {
         
         let mut vpn = inner.start_vpn;
         let mut offset = 0;
-        while offset < inner.file.stat()?.file_size {
-            let pg = inner.file.get_page(offset)?;
+        let length = min(inner.file.stat()?.file_size, inner.length);
+        while offset < length {
+            let pg = inner.file.get_page(offset + inner.file_offset)?;
             inner.frames.insert(vpn, pg.clone());
             pagetable.map(vpn, pg.ppn, inner.flag.into());
             offset += PAGE_SIZE;
@@ -353,13 +427,13 @@ impl Segment for VMASegment {
         SegmentType::VMA
     }
 
-    fn start_vpn(&self) -> VirtPageNum {
-        self.0.acquire().start_vpn
+    fn contains(&self, vpn: VirtPageNum) -> bool {
+        self.0.acquire().frames.keys().any(|&x| x == vpn)
     }
 
-    fn clone_seg(self: Arc<Self>) -> Result<Arc<dyn Segment>, ErrorNum> {
+    fn clone_seg(self: Arc<Self>) -> Result<ArcSegment, ErrorNum> {
         let inner = self.0.acquire();
-        Ok(Self::new_at(inner.start_vpn, inner.file.clone(), inner.flag))
+        Self::new_at(inner.start_vpn, inner.file.clone(), inner.flag, inner.file_offset, inner.length)
     }
 }
 
@@ -410,11 +484,11 @@ impl Segment for TrampolineSegment {
         SegmentType::Trampoline
     }
 
-    fn start_vpn(&self) -> VirtPageNum {
-        U_TRAMPOLINE_ADDR.into()
+    fn contains(&self, vpn: VirtPageNum) -> bool {
+        vpn == TRAMPOLINE_ADDR.into()
     }
 
-    fn clone_seg(self: Arc<Self>) -> Result<Arc<dyn Segment>, ErrorNum> {
+    fn clone_seg(self: Arc<Self>) -> Result<ArcSegment, ErrorNum> {
         Ok(Self::new())
     }
 }
@@ -466,11 +540,11 @@ impl Segment for UTrampolineSegment {
         SegmentType::UTrampoline
     }
 
-    fn start_vpn(&self) -> VirtPageNum {
-        U_TRAMPOLINE_ADDR.into()
+    fn contains(&self, vpn: VirtPageNum) -> bool {
+        vpn == U_TRAMPOLINE_ADDR.into()
     }
 
-    fn clone_seg(self: Arc<Self>) -> Result<Arc<dyn Segment>, ErrorNum> {
+    fn clone_seg(self: Arc<Self>) -> Result<ArcSegment, ErrorNum> {
         Ok(Self::new())
     }
 }
@@ -526,11 +600,11 @@ impl Segment for TrapContextSegment {
         SegmentType::TrapContext
     }
 
-    fn start_vpn(&self) -> VirtPageNum {
-        TRAP_CONTEXT_ADDR.into()
+    fn contains(&self, vpn: VirtPageNum) -> bool {
+        vpn == TRAP_CONTEXT_ADDR.into()
     }
 
-    fn clone_seg(self: Arc<Self>) -> Result<Arc<dyn Segment>, ErrorNum> {
+    fn clone_seg(self: Arc<Self>) -> Result<ArcSegment, ErrorNum> {
         Ok(Self::new(Some(self.clone())))
     }
 }
@@ -596,11 +670,11 @@ impl Segment for ProcKStackSegment {
         SegmentType::TrapContext
     }
 
-    fn start_vpn(&self) -> VirtPageNum {
-        TRAP_CONTEXT_ADDR.into()
+    fn contains(&self, vpn: VirtPageNum) -> bool {
+        VPNRange::new(PROC_K_STACK_ADDR.into(), (PROC_K_STACK_ADDR + PROC_K_STACK_SIZE).into()).contains(vpn)
     }
 
-    fn clone_seg(self: Arc<Self>) -> Result<Arc<dyn Segment>, ErrorNum> {
+    fn clone_seg(self: Arc<Self>) -> Result<ArcSegment, ErrorNum> {
         Ok(Self::new())
     }
 }
@@ -672,34 +746,34 @@ impl Segment for ProcUStackSegment {
         SegmentType::TrapContext
     }
 
-    fn start_vpn(&self) -> VirtPageNum {
-        TRAP_CONTEXT_ADDR.into()
+    fn contains(&self, vpn: VirtPageNum) -> bool {
+        VPNRange::new(PROC_U_STACK_ADDR.into(), (PROC_U_STACK_ADDR + PROC_U_STACK_SIZE).into()).contains(vpn)
     }
 
-    fn clone_seg(self: Arc<Self>) -> Result<Arc<dyn Segment>, ErrorNum> {
+    fn clone_seg(self: Arc<Self>) -> Result<ArcSegment, ErrorNum> {
         Ok(Self::new(Some(self.clone())))
     }
 }
 
 impl IdenticalMappingSegment {
-    pub fn new(range: VPNRange, flag: SegmentFlags) -> Arc<Self> {
+    pub fn new(range: VPNRange, flag: SegmentFlags) -> ArcSegment {
         Arc::new(Self( SpinMutex::new("Segment lock", IdenticalMappingSegmentInner{
             range,
             flag,
             status: SegmentStatus::Initialized
-        })))
+        }))).as_segment().into()
     }
 }
 
 impl ManagedSegment {
-    pub fn new(range: VPNRange, flag: SegmentFlags, clone_source: Option<Arc<Self>>) -> Arc<Self> {
+    pub fn new(range: VPNRange, flag: SegmentFlags, clone_source: Option<Arc<ManagedSegment>>) -> ArcSegment {
         Arc::new(Self( SpinMutex::new("Segment lock", ManagedSegmentInner{
             range,
             frames: BTreeMap::new(),
             flag,
             status: SegmentStatus::Initialized,
             clone_source
-        })))
+        }))).as_segment().into()
     }
 
     pub fn alter_permission(&self, flag: SegmentFlags, pagetable: &mut PageTable) -> SegmentFlags {
@@ -717,44 +791,47 @@ impl ManagedSegment {
 }
 
 impl VMASegment {
-    pub fn new_at(start_vpn: VirtPageNum, file: Arc<dyn RegularFile>, flag: SegmentFlags) -> Arc<Self> {
+    /// file_offset and length are in bytes
+    pub fn new_at(start_vpn: VirtPageNum, file: Arc<dyn RegularFile>, flag: SegmentFlags, file_offset: usize, length: usize) -> Result<ArcSegment, ErrorNum> {
         let res = VMASegmentInner {
             frames: BTreeMap::new(),
             file: file.clone(),
             flag,
             status: SegmentStatus::Initialized,
-            start_vpn
+            start_vpn,
+            file_offset,
+            length,
         };
-        Arc::new(VMASegment(SpinMutex::new("Segment lock", res)))
+        Ok(Arc::new(VMASegment(SpinMutex::new("Segment lock", res))).as_segment().into())
     }
 }
 
 impl TrampolineSegment {
-    pub fn new() -> Arc<Self> {
-        Arc::new(Self( SpinMutex::new("Segment lock", TrampolineSegmentInner{ status: SegmentStatus::Initialized } )))
+    pub fn new() -> ArcSegment {
+        Arc::new(Self( SpinMutex::new("Segment lock", TrampolineSegmentInner{ status: SegmentStatus::Initialized } ))).as_segment().into()
     }
 }
 
 impl UTrampolineSegment {
-    pub fn new() -> Arc<Self> {
-        Arc::new(Self( SpinMutex::new("Segment lock", UTrampolineSegmentInner{ status: SegmentStatus::Initialized } )))
+    pub fn new() -> ArcSegment {
+        Arc::new(Self( SpinMutex::new("Segment lock", UTrampolineSegmentInner{ status: SegmentStatus::Initialized } ))).as_segment().into()
     }
 }
 
 impl TrapContextSegment {
-    pub fn new(clone_source: Option<Arc<Self>>) -> Arc<Self> {
-        Arc::new(Self(SpinMutex::new("Segment lock",  TrapContextSegmentInner{ status: SegmentStatus::Initialized, page: None, clone_source} )))
+    pub fn new(clone_source: Option<Arc<TrapContextSegment>>) -> ArcSegment {
+        Arc::new(Self(SpinMutex::new("Segment lock",  TrapContextSegmentInner{ status: SegmentStatus::Initialized, page: None, clone_source} ))).as_segment().into()
     }
 }
 
 impl ProcKStackSegment {
-    pub fn new() -> Arc<Self> {
-        Arc::new(Self(SpinMutex::new("Segment lock", ProcKStackSegmentInner{ status: SegmentStatus::Initialized, pages: Vec::new()})))
+    pub fn new() -> ArcSegment {
+        Arc::new(Self(SpinMutex::new("Segment lock", ProcKStackSegmentInner{ status: SegmentStatus::Initialized, pages: Vec::new()}))).as_segment().into()
     }
 }
 
 impl ProcUStackSegment {
-    pub fn new(clone_source: Option<Arc<Self>>) -> Arc<Self> {
-        Arc::new(Self(SpinMutex::new("Segment lock", ProcUStackSegmentInner{ status: SegmentStatus::Initialized, pages: Vec::new(), clone_source})))
+    pub fn new(clone_source: Option<Arc<ProcUStackSegment>>) -> ArcSegment {
+        Arc::new(Self(SpinMutex::new("Segment lock", ProcUStackSegmentInner{ status: SegmentStatus::Initialized, pages: Vec::new(), clone_source}))).as_segment().into()
     }
 }
