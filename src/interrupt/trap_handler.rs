@@ -93,6 +93,10 @@ pub fn kernel_trap() {
             panic!("Kernel panic");
         }
     }
+    unsafe {
+        scause::write(scause.bits());
+        sepc::write(sepc);
+    }
 }
 
 #[no_mangle]

@@ -1,4 +1,4 @@
-use crate::{fs::{vfs::OpenMode, fs_impl::parch_fs::{BAD_BLOCK, BLOCKNO_PER_BLK, PFS_MAXCAP}, Path, types::FileType}, mem::{PageGuard, VirtPageNum, claim_fs_page, VirtAddr}, utils::{ErrorNum, Mutex, MutexGuard, time::get_real_time_epoch}};
+use crate::{fs::{vfs::OpenMode, fs_impl::parch_fs::{BAD_BLOCK, BLOCKNO_PER_BLK, PFS_MAXCAP}, Path, types::FileType, Cursor}, mem::{PageGuard, VirtPageNum, claim_fs_page, VirtAddr}, utils::{ErrorNum, Mutex, MutexGuard, time::get_real_time_epoch}};
 use super::{DIRECT_BLK_COUNT, BLK_SIZE, fs::{ParchFS, ParchFSInner}, BlockNo, INodeNo, PFSINode};
 
 
@@ -250,7 +250,8 @@ impl PFSBase {
     }
     
     // if inode was gone (deleted by other process), cannot write but can still read from remained mmap.
-    pub fn write(&self, data: alloc::vec::Vec::<u8>, mut offset: usize) -> Result<(), crate::utils::ErrorNum> {
+    pub fn write(&self, data: alloc::vec::Vec::<u8>, offset: Cursor) -> Result<(), crate::utils::ErrorNum> {
+        let mut offset = offset.0;
         if data.len() == 0 {return Ok(())}
         let fs = self.fs.upgrade().unwrap();
         let mut fs_inner = fs.inner.acquire();
@@ -289,7 +290,8 @@ impl PFSBase {
         }
     }
 
-    pub fn read(&self, length: usize, mut offset: usize) -> Result<alloc::vec::Vec<u8>, crate::utils::ErrorNum> {
+    pub fn read(&self, length: usize, offset: Cursor) -> Result<alloc::vec::Vec<u8>, crate::utils::ErrorNum> {
+        let mut offset = offset.0;
         let fs = self.fs.upgrade().unwrap();
         let mut fs_inner = fs.inner.acquire();
         let inode_guard = fs_inner.get_inode(self.inode_no)?;

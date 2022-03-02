@@ -1,4 +1,4 @@
-use crate::{mem::{PhysAddr, VMASegment}, utils::{SpinMutex, Mutex, ErrorNum, time::get_real_time_epoch}, fs::{RegularFile, File, BlockFile, DirFile, OpenMode, types::{FileType, Permission, Dirent}}, config::PAGE_SIZE};
+use crate::{mem::{PhysAddr, VMASegment}, utils::{SpinMutex, Mutex, ErrorNum, time::get_real_time_epoch}, fs::{RegularFile, File, BlockFile, DirFile, OpenMode, types::{FileType, Permission, Dirent}, Cursor}, config::PAGE_SIZE};
 use super::{DIRECT_BLK_COUNT, INODE_SIZE, DENTRY_NAME_LEN, DENTRY_SIZE, fs::{ParchFS}, PFSBase, BAD_BLOCK, BAD_INODE, BLK_SIZE};
 
 use core::mem::size_of;
@@ -183,7 +183,8 @@ pub struct SuperBlock {
 }
 
 pub struct PFSRegularInner {
-    pub base: PFSBase
+    pub base: PFSBase,
+    pub cursor: Cursor,
 }
 
 pub struct PFSRegular(SpinMutex<PFSRegularInner>);
@@ -202,12 +203,19 @@ impl Drop for PFSRegular {
 }
 
 impl File for PFSRegular {
-    fn write(&self, data: alloc::vec::Vec::<u8>, offset: usize) -> Result<(), crate::utils::ErrorNum> {
-        self.0.acquire().base.write(data, offset)
+    fn write(&self, data: alloc::vec::Vec::<u8>) -> Result<usize, crate::utils::ErrorNum> {
+        let mut inner = self.0.acquire();
+        let len = data.len();
+        inner.base.write(data, inner.cursor)?;
+        inner.cursor.0 += len;
+        Ok(len)
     }
 
-    fn read(&self, length: usize, offset: usize) -> Result<alloc::vec::Vec<u8>, crate::utils::ErrorNum> {
-        self.0.acquire().base.read(length, offset)
+    fn read(&self, length: usize) -> Result<alloc::vec::Vec<u8>, crate::utils::ErrorNum> {
+        let mut inner = self.0.acquire();
+        let res = inner.base.read(length, inner.cursor)?;
+        inner.cursor.0 += length;
+        Ok(res)
     }
 
     fn as_socket<'a>(self: alloc::sync::Arc<Self>) -> Result<alloc::sync::Arc<dyn crate::fs::SocketFile   + 'a>, crate::utils::ErrorNum> where Self: 'a {
@@ -309,7 +317,7 @@ impl PFSDirInner {
             panic!("Malformed FS")
         }
         let dirent_count = stat.file_size / size_of::<PFSDEntry>();
-        let buffer = self.base.read(stat.file_size, 0)?;
+        let buffer = self.base.read(stat.file_size, Cursor::at_start())?;
         let buffer = buffer.as_ptr() as *mut PFSDEntry;
         let buffer = unsafe{from_raw_parts(buffer, dirent_count).to_vec()};
         Ok(buffer)
@@ -327,7 +335,7 @@ impl PFSDirInner {
         let buffer: *const PFSDEntry = &dirent;
         let buffer = buffer as *const u8;
         let buffer = unsafe{from_raw_parts(buffer, size_of::<PFSDEntry>()).to_vec()};
-        self.base.write(buffer, pos * size_of::<PFSDEntry>())?;
+        self.base.write(buffer, Cursor(pos * size_of::<PFSDEntry>()))?;
         Ok(())
     }
 
@@ -350,17 +358,12 @@ impl PFSDirInner {
 }
 
 impl File for PFSDir {
-    fn write(&self, data: alloc::vec::Vec::<u8>, offset: usize) -> Result<(), ErrorNum> {
-        let inner = self.0.acquire();
-        if inner.base.open_mode == OpenMode::SYS {
-            inner.base.write(data, offset)
-        } else {
-            Err(ErrorNum::EISDIR)
-        }
+    fn write(&self, data: alloc::vec::Vec::<u8>) -> Result<usize, crate::utils::ErrorNum> {
+        Err(ErrorNum::EISDIR)
     }
 
-    fn read(&self, length: usize, offset: usize) -> Result<alloc::vec::Vec<u8>, ErrorNum> {
-        self.0.acquire().base.read(length, offset)
+    fn read(&self, length: usize) -> Result<alloc::vec::Vec<u8>, ErrorNum> {
+        Err(ErrorNum::EISDIR)
     }
 
     fn as_socket<'a>(self: alloc::sync::Arc<Self>) -> Result<alloc::sync::Arc<dyn crate::fs::SocketFile   + 'a>, ErrorNum> where Self: 'a {
@@ -423,7 +426,7 @@ impl DirFile for PFSDir {
                     inode_inner.access_time = get_real_time_epoch();
                     let res: Arc<dyn File> = match f_type {
                         FileType::REGULAR => {
-                            Arc::new(PFSRegular(SpinMutex::new("PFSFile lock", PFSRegularInner{base})))
+                            Arc::new(PFSRegular(SpinMutex::new("PFSFile lock", PFSRegularInner{base, cursor: Cursor(0)})))
                         },
                         FileType::DIR => {
                             Arc::new(PFSDir(SpinMutex::new("PFSFile lock", PFSDirInner{base})))
@@ -551,11 +554,11 @@ impl Debug for PFSLink {
 }
 
 impl File for PFSLink {
-    fn write            (&self, _data: alloc::vec::Vec::<u8>, _offset: usize) -> Result<(), ErrorNum> {
+    fn write            (&self, _data: alloc::vec::Vec::<u8>) -> Result<usize, ErrorNum> {
         todo!()
     }
 
-    fn read             (&self, _length: usize, _offset: usize) -> Result<alloc::vec::Vec<u8>, ErrorNum> {
+    fn read             (&self, _length: usize) -> Result<alloc::vec::Vec<u8>, ErrorNum> {
         todo!()
     }
 

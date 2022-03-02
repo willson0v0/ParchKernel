@@ -105,7 +105,7 @@ impl MemLayout {
                 IdenticalMappingSegment::new(
                     VPNRange::new(
                         VirtAddr::from(*start).into(), 
-                        VirtAddr::from(*end).to_vpn_ceil()
+                        VirtAddr::from(*end).into()
                     ),
                     SegmentFlags::R | SegmentFlags::W
                 )

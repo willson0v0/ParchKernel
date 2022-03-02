@@ -168,7 +168,7 @@ impl Processor {
     }
 
     pub fn stall(&self) {
-        assert!(sstatus::read().sie(), "Interrupt disabled.");
+        intr_on();
         unsafe { asm!("wfi") };
     }
     

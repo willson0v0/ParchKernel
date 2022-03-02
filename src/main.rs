@@ -132,12 +132,14 @@ extern "C" fn genesis_m(hart_id: usize) -> ! {
 #[no_mangle]
 extern "C" fn genesis_s() -> ! {
     process::intr_off();
+    interrupt::set_kernel_trap_entry();
     if get_hart_id() == 0 {
         // common init code (mm/fs)
-        interrupt::set_kernel_trap_entry();
         mem::init();
-        process::intr_on();
         mem::hart_init();
+
+        interrupt::init();
+        interrupt::init_hart();
         
         println!("\r\n\n\n\nParch OS\n");
         println!("Ver\t: {}", version::VERSION);
@@ -152,8 +154,10 @@ extern "C" fn genesis_s() -> ! {
         interrupt::set_kernel_trap_entry();
         while !BOOT_FIN.load(Ordering::Acquire) {}
         mem::hart_init();
-        process::intr_on();
+        interrupt::init_hart();
     }
+    
+    process::intr_on();
     process::hart_init();
     
     unreachable!();

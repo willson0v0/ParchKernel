@@ -55,11 +55,13 @@ impl<T> SpinMutex<T> {
     }
     
     pub fn acquire_no_off(&self) -> MutexGuard<'_, T> {
+        push_intr_off();
         while self.is_acquired.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
             // spin wait
         }
         // change after lock has been successfully acquired, thus refcell is safe to change
         unsafe{*self.did_push_off.get() = false;}
+        pop_intr_off();
         MutexGuard{mutex: self}
     }
 }

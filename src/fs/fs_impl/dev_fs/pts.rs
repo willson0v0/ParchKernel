@@ -24,17 +24,13 @@ impl Debug for UartPTS {
 }
 
 impl File for UartPTS {
-    fn write(&self, data: alloc::vec::Vec::<u8>, _offset: usize) -> Result<(), crate::utils::ErrorNum> {
+    fn write(&self, data: alloc::vec::Vec::<u8>) -> Result<usize, crate::utils::ErrorNum> {
         UART0.write_data(&data);
-        Ok(())
+        Ok(data.len())
     }
 
-    fn read(&self, length: usize, offset: usize) -> Result<alloc::vec::Vec<u8>, crate::utils::ErrorNum> {
-        if offset != 0 {
-            Err(ErrorNum::EOOR)
-        } else {
-            Ok(UART0.read_bytes(length))
-        }
+    fn read(&self, length: usize) -> Result<alloc::vec::Vec<u8>, crate::utils::ErrorNum> {
+        Ok(UART0.read_bytes(length))
     }
 
     fn as_socket<'a>(self: alloc::sync::Arc<Self>) -> Result<alloc::sync::Arc<dyn crate::fs::SocketFile   + 'a>, crate::utils::ErrorNum> where Self: 'a {

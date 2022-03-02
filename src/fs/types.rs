@@ -68,9 +68,18 @@ pub struct DEntry {
     name: String
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct Cursor(pub usize);
+
+impl Cursor {
+    pub fn at_start() -> Self {
+        Self(0)
+    }
+}
+
 pub trait File: Send + Sync + Debug {
-    fn write            (&self, data: Vec::<u8>, offset: usize) -> Result<(), ErrorNum>;
-    fn read             (&self, length: usize, offset: usize) -> Result<Vec<u8>, ErrorNum>;
+    fn write            (&self, data: alloc::vec::Vec::<u8>) -> Result<usize, crate::utils::ErrorNum>;
+    fn read             (&self, length: usize) -> Result<Vec<u8>, ErrorNum>;
     fn as_socket    <'a>(self: Arc<Self>) -> Result<Arc<dyn SocketFile   + 'a>, ErrorNum> where Self: 'a;
     fn as_link      <'a>(self: Arc<Self>) -> Result<Arc<dyn LinkFile     + 'a>, ErrorNum> where Self: 'a;
     fn as_regular   <'a>(self: Arc<Self>) -> Result<Arc<dyn RegularFile  + 'a>, ErrorNum> where Self: 'a;

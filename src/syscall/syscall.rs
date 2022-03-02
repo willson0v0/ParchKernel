@@ -6,8 +6,8 @@ use super::{syscall_num::*, types::{self, MMAPProt, MMAPFlag}};
 
 pub fn syscall(syscall_id: usize, args: [usize; 6]) -> Result<usize, ErrorNum> {
     match syscall_id {
-        SYSCALL_WRITE       => CALL_SYSCALL!(sys_write      , FileDescriptor::from(args[0]), VirtAddr::from(args[1]), args[2], args[3]),
-        SYSCALL_READ        => CALL_SYSCALL!(sys_read       , FileDescriptor::from(args[0]), VirtAddr::from(args[1]), args[2], args[3]),
+        SYSCALL_WRITE       => CALL_SYSCALL!(sys_write      , FileDescriptor::from(args[0]), VirtAddr::from(args[1]), args[2]),
+        SYSCALL_READ        => CALL_SYSCALL!(sys_read       , FileDescriptor::from(args[0]), VirtAddr::from(args[1]), args[2]),
         SYSCALL_OPEN        => CALL_SYSCALL!(sys_open       , VirtAddr::from(args[0]), args[1]),
         SYSCALL_OPENAT      => CALL_SYSCALL!(sys_openat     , FileDescriptor::from(args[0]), VirtAddr::from(args[1]), args[2]),
         SYSCALL_CLOSE       => CALL_SYSCALL!(sys_close      , FileDescriptor::from(args[0])),
@@ -26,24 +26,20 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> Result<usize, ErrorNum> {
     }
 }
 
-pub fn sys_write(fd: FileDescriptor, buf: VirtAddr, length: usize, offset: usize) -> Result<usize, ErrorNum> {
-    let proc = get_processor().current().unwrap();
-    let pcb_inner = proc.get_inner();
-    let file = pcb_inner.get_file(fd)?;
+pub fn sys_write(fd: FileDescriptor, buf: VirtAddr, length: usize) -> Result<usize, ErrorNum> {
+    let file = get_processor().current().unwrap().get_inner().get_file(fd)?.clone();
     // TODO: register MMAP if needed
     push_sum_on();
     let data = unsafe{buf.read_data(length)};
     pop_sum_on();
-    file.write(data, offset)?;
+    file.write(data)?;
     Ok(length)
 }
 
-pub fn sys_read(fd: FileDescriptor, buf: VirtAddr, length: usize, offset: usize) -> Result<usize, ErrorNum> {
-    let proc = get_processor().current().unwrap();
-    let pcb_inner = proc.get_inner();
-    let file = pcb_inner.get_file(fd)?;
+pub fn sys_read(fd: FileDescriptor, buf: VirtAddr, length: usize) -> Result<usize, ErrorNum> {
+    let file = get_processor().current().unwrap().get_inner().get_file(fd)?.clone();
     // TODO: register MMAP if needed
-    let res = file.read(length, offset)?;
+    let res = file.read(length)?;
     push_sum_on();
     unsafe {buf.write_data(res)};
     pop_sum_on();

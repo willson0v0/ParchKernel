@@ -16,6 +16,7 @@ pub use types::{
     DirFile     ,
     CharFile    ,
     FIFOFile    ,
+    Cursor,
 };
 
 pub use vfs::{

@@ -150,9 +150,9 @@ impl Uart {
     pub fn write(&self, data: &str) {
         let mut inner = self.inner.acquire();
         while inner.write_buffer.len() >= 1024 {
-            drop(inner);
-            get_processor().suspend_switch();
-            inner = self.inner.acquire();
+            // drop(inner);
+            // get_processor().suspend_switch();
+            // inner = self.inner.acquire();
         }
         inner.write(data);
         inner.sync();
@@ -259,35 +259,41 @@ impl Uart {
         let mut inner = self.inner.acquire();
         // waiting for irq
         while inner.read_buffer.len() == 0 {
-            drop(inner);
-            get_processor().suspend_switch();
-            inner = self.inner.acquire();
+            // drop(inner);
+            // get_processor().suspend_switch();
+            // inner = self.inner.acquire();
         }
         inner.read_buffer.pop_front().unwrap()
     }
 
-    pub fn read_bytes(&self, length: usize) -> Vec<u8> {
+    pub fn read_byte_synced(&self) -> u8 {
         let mut inner = self.inner.acquire();
+        inner.read_synced()
+    }
+
+    pub fn read_bytes(&self, length: usize) -> Vec<u8> {
+        // allow uart interrupt
+        let mut inner = self.inner.acquire_no_off();
         let mut res = Vec::new();
         while res.len() < length {
             // waiting for irq
             while inner.read_buffer.len() == 0 {
-                drop(inner);
-                get_processor().suspend_switch();
-                inner = self.inner.acquire();
+                // drop(inner);
+                // get_processor().suspend_switch();
+                // inner = self.inner.acquire();
             }
             res.push(inner.read_buffer.pop_front().unwrap());
         }
         res
     }
 
-    pub fn read_byte_synced(&self) -> u8 {
-        let mut inner = self.inner.acquire();
-        if let Some(res) = inner.read_buffer.pop_front(){
-            res
-        } else {
-            inner.read_synced()
+    pub fn read_bytes_synced(&self, length: usize) -> Vec<u8> {
+        let mut inner = self.inner.acquire_no_off();
+        let mut res = Vec::new();
+        while res.len() < length {
+            res.push(inner.read_synced());
         }
+        res
     }
 
     pub fn sync(&self) {
@@ -312,7 +318,9 @@ impl UartInner {
     }
 
     pub fn read(&mut self) -> Option<u8> {
-        if self.read_reg(self.line_status_register) & 0b00000001 != 0 {
+        if !self.read_buffer.is_empty() {
+            self.read_buffer.pop_front()
+        } else if self.read_reg(self.line_status_register) & 0b00000001 != 0 {
             Some(self.read_reg(self.receiver_buffer))
         } else {
             None
