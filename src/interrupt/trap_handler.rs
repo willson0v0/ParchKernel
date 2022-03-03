@@ -9,7 +9,7 @@ use riscv::register::{scause::{   // s cause register
     }, sepc, sip, sstatus::{self, SPP}, stval, stvec};
 
 use super::PLIC0;
-use crate::{config::{UART0_IRQ, TRAMPOLINE_ADDR, PROC_K_STACK_ADDR, PROC_K_STACK_SIZE, TRAP_CONTEXT_ADDR, PROC_U_STACK_ADDR, PROC_U_STACK_SIZE, U_TRAMPOLINE_ADDR}, process::{get_processor, ProcessStatus, intr_off, get_hart_id, intr_on, def_handler::def_ignore, SignalNum}, mem::VirtAddr, interrupt::trap_context::TrapContext, syscall::syscall};
+use crate::{config::{UART0_IRQ, TRAMPOLINE_ADDR, PROC_K_STACK_ADDR, PROC_K_STACK_SIZE, TRAP_CONTEXT_ADDR, PROC_U_STACK_ADDR, PROC_U_STACK_SIZE, U_TRAMPOLINE_ADDR}, process::{get_processor, ProcessStatus, intr_off, get_hart_id, intr_on, def_handler::def_ignore, SignalNum}, mem::VirtAddr, interrupt::trap_context::TrapContext, syscall::syscall, utils::Mutex};
 use crate::utils::UART0;
 
 /// Set trap entry to kernel trap handling function.
@@ -31,16 +31,20 @@ pub fn kernel_trap() {
 
     assert!(sstatus.spp() == SPP::Supervisor, "kerneltrap not from supervisor mode");
     assert!(!sstatus.sie(), "kernel interrupt is enabled");
-
+    
     match scause.cause() {
         // PLIC interrupt
         Trap::Interrupt(Interrupt::SupervisorExternal) => {
             match PLIC0.plic_claim() {
                 UART0_IRQ => {
                     UART0.sync();
+                    PLIC0.plic_complete(UART0_IRQ);
                 },
-                _ => {
-                    panic!("Unknown external interrupt")
+                0 => {
+                    // do nothing
+                },
+                unknown_ext => {
+                    panic!("Unknown external interrupt 0x{:x}", unknown_ext)
                 }
             }
         },
@@ -56,6 +60,8 @@ pub fn kernel_trap() {
                 };
             }
             assert!(sip::read().bits() & 2 == 0, "Failed to clear ssip");
+            // Not doing time like xv6 here, we use CLINT for time.
+            // ?: No Timer Vec then?
         },
         _ => {
             fatal!("Unexpected scause:");
@@ -147,6 +153,21 @@ pub fn user_trap() -> ! {
             verbose!("SupervisorSoft");
             get_processor().suspend_switch();
         },
+        // PLIC interrupt
+        Trap::Interrupt(Interrupt::SupervisorExternal) => {
+            match PLIC0.plic_claim() {
+                UART0_IRQ => {
+                    UART0.sync();
+                    PLIC0.plic_complete(UART0_IRQ);
+                },
+                0 => {
+                    // do nothing
+                },
+                unknown_ext => {
+                    panic!("Unknown external interrupt 0x{:x}", unknown_ext)
+                }
+            }
+        },
         _ => {
             fatal!("Unexpected scause:");
             match scause.cause() {
@@ -190,21 +211,31 @@ pub fn user_trap() -> ! {
 }
 
 #[no_mangle]
+pub fn fork_return() -> ! {
+    {
+        let pcb = get_processor().current().unwrap();
+        let mut pcb_inner = unsafe {pcb.inner.from_locked()};
+        if pcb_inner.status == ProcessStatus::Init {
+            let trap_context = TrapContext::current_ref();
+            let elf_file = pcb_inner.elf_file.clone();
+            pcb_inner.entry_point = pcb_inner.mem_layout.map_elf(elf_file).unwrap();
+            pcb_inner.status = ProcessStatus::Running;
+            *trap_context = TrapContext::new();
+            trap_context.epc = pcb_inner.entry_point;
+            trap_context.sp = (PROC_U_STACK_ADDR + PROC_U_STACK_SIZE).0;
+            debug!("Initialized PCB with entry_point @ {:?}", pcb_inner.entry_point);
+        }
+    }
+    trap_return();
+}
+
+
+#[no_mangle]
 pub fn trap_return() -> ! {
     intr_off();
     let pcb = get_processor().current().unwrap();
     let mut pcb_inner = pcb.get_inner();
     let trap_context = TrapContext::current_ref();
-    if pcb_inner.status == ProcessStatus::Initialized {
-        let elf_file = pcb_inner.elf_file.clone();
-        pcb_inner.entry_point = pcb_inner.mem_layout.map_elf(elf_file).unwrap();
-        pcb_inner.status = ProcessStatus::Running;
-        *trap_context = TrapContext::new();
-        trap_context.epc = pcb_inner.entry_point;
-        trap_context.sp = (PROC_U_STACK_ADDR + PROC_U_STACK_SIZE).0;
-
-        debug!("Initialized PCB with entry_point @ {:?}", pcb_inner.entry_point);
-    }
     trap_context.kernel_sp = PROC_K_STACK_ADDR + PROC_K_STACK_SIZE;
     trap_context.user_trap = (user_trap as usize).into();
     trap_context.hart_id = get_hart_id();

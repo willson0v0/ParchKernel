@@ -9,28 +9,29 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use lazy_static::*;
 use crate::config::{MAX_CPUS, PROC_K_STACK_ADDR, PROC_K_STACK_SIZE};
-use crate::interrupt::trap_return;
+use crate::interrupt::{trap_return, fork_return};
 use crate::mem::{MemLayout};
 use crate::process::ProcessControlBlock;
 use crate::process::pcb::ProcessStatus;
-use crate::utils::{Mutex};
+use crate::utils::{Mutex, MutexGuard};
 
+use super::pcb::PCBInner;
 use super::{dequeue, enqueue, INIT_PROCESS};
 
 global_asm!(include_str!("swtch.asm"));
 
 extern "C" {
-    /// The `__switch()` function for switching kernel execution flow.
+    /// The `__swtch()` function for switching kernel execution flow.
     pub fn __swtch(
         current_context: *mut ProcessContext,
-        next_context: *mut ProcessContext
+        next_context: *const ProcessContext
     );
 }
 
 /// The process context used in `__switch` (kernel execution flow) 
 /// Saved on top of the kernel stack of corresponding process.
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Debug)]
 pub struct ProcessContext {
     ra      : usize,
     sp      : usize,
@@ -41,7 +42,7 @@ pub struct ProcessContext {
 impl ProcessContext {
     pub fn new() -> Self {
         Self {
-            ra: trap_return as usize,
+            ra: fork_return as usize,
             sp: PROC_K_STACK_ADDR.0 + PROC_K_STACK_SIZE,    // Stack top
             s_regs: [0; 12],
             s_fregs:[0.0; 12]
@@ -80,7 +81,7 @@ lazy_static!{
 /// Struct that repersent CPU's state
 pub struct Processor {
     pub hart_id: usize,
-    pub inner: RefCell<ProcessorInner>
+    inner: RefCell<ProcessorInner>
 }
 
 unsafe impl Sync for Processor{}
@@ -104,7 +105,12 @@ impl Processor {
 
     /// WARN: Don't use these! use push/pop_intr_off!
     pub fn register_push_off(&self, intr_state_b4: bool) {
-        self.inner.borrow_mut().register_push_off(intr_state_b4);
+        // self.inner.borrow_mut().register_push_off(intr_state_b4);
+        let res =  self.inner.try_borrow_mut();
+        match res {
+            Ok(mut inner) => {inner.register_push_off(intr_state_b4)},
+            Err(err) => {panic!("wtf @ {:?}", err)}
+        }
     }
 
     pub fn register_pop_off(&self) -> bool {
@@ -115,16 +121,16 @@ impl Processor {
         return sstatus::read().sie();
     }
 
-    pub fn context_ptr(&self) -> *mut ProcessContext {
-        self.inner.borrow_mut().context_ptr()
+    pub fn get_context(&self) -> *mut ProcessContext {
+        self.inner.borrow_mut().get_context()
     }
     
     pub fn push_sum_on(&self) {
-        self.inner.borrow_mut().push_sum_on()
+        self.inner.borrow_mut().push_sum_on();
     }
 
     pub fn pop_sum_on(&self) {
-        self.inner.borrow_mut().pop_sum_on()
+        self.inner.borrow_mut().pop_sum_on();
     }
 
     pub fn current(&self) -> Option<Arc<ProcessControlBlock>> {
@@ -139,20 +145,21 @@ impl Processor {
     /// never ending
     pub fn run(&self) -> ! {
         loop {
+            intr_on();
             if let Some(proc) = dequeue() {
                 verbose!("Found available process {}", proc.pid);
                 let mut pcb_inner = proc.get_inner();
-                // Initialized process going to trap_return(), where it will map elf and change status to ready
-                if pcb_inner.status != ProcessStatus::Initialized {
-                    assert!(pcb_inner.status == ProcessStatus::Ready);
+                assert!(pcb_inner.status == ProcessStatus::Ready || pcb_inner.status == ProcessStatus::Init);
+                if pcb_inner.status != ProcessStatus::Init {
                     pcb_inner.status = ProcessStatus::Running;
                 }
-                let proc_context = pcb_inner.context_ptr();
-                let idle_context = self.context_ptr();
+                let proc_context = pcb_inner.get_context();
+                let mut idle_context = self.get_context();
                 let proc_satp = pcb_inner.mem_layout.pagetable.satp(Some(proc.pid));
                 let scheuler_satp = self.inner.borrow().sche_mem_layout.as_ref().unwrap().pagetable.satp(None);
-                drop(pcb_inner);
-                self.inner.borrow_mut().pcb = Some(proc);
+                self.inner.borrow_mut().pcb = Some(proc.clone());
+                // 1st return form scheduler, pcb_inner is locked for fork_ret();
+                // 2nd+ return from scheduler, pcb_inner is locked for to_scheduler().
                 unsafe {
                     satp::write(proc_satp);
                     asm!("sfence.vma");
@@ -160,6 +167,7 @@ impl Processor {
                     satp::write(scheuler_satp);
                     asm!("sfence.vma");
                 }
+                pcb_inner.check_intergrity();
             } else {
                 verbose!("No available process. Processor IDLE.");
                 self.stall();
@@ -171,45 +179,63 @@ impl Processor {
         intr_on();
         unsafe { asm!("wfi") };
     }
-    
-    pub fn suspend_switch(&self) {
-        let process = self.take_current().expect("Suspend switch need running process to work");
-        verbose!("Switching out from {} context", process.pid);
-        let mut pcb_inner = process.get_inner();
-        let proc_context = pcb_inner.context_ptr();
-        let idle_context = self.context_ptr();
-        pcb_inner.status = ProcessStatus::Ready;
-        drop(pcb_inner);
-        enqueue(process);
+
+    pub fn to_scheduler(&self, mut proc_inner: MutexGuard<PCBInner>) {
+        proc_inner.check_intergrity();
+        assert!(proc_inner.status != ProcessStatus::Running, "Current thread must not be running");
+        assert!(self.intr_state() == false, "Interrupt must be off to switch to scheduler.");
+        assert!(self.get_int_cnt() == 1, "Must only hold one lock when switching to scheduler.");
+        let idle_context = self.get_context();
+        let proc_context = proc_inner.get_context();
         unsafe {
             __swtch(proc_context, idle_context);
         }
+        proc_inner.check_intergrity();
+    }
+    
+    pub fn suspend_switch(&self) {
+        let int_ena = get_processor().get_int_ena();
+        let int_cnt = get_processor().get_int_cnt();
+
+        let process = self.take_current().expect("Suspend switch need running process to work");
+        let mut pcb_inner = process.get_inner();
+        pcb_inner.status = ProcessStatus::Ready;
+        enqueue(process.clone());
+
+        // pcb_inner was locked for scheduler
+        self.to_scheduler(pcb_inner);
+
+        get_processor().set_int_cnt(int_cnt);
+        get_processor().set_int_ena(int_ena);
     }
 
-    pub fn exit_switch(&self, exit_code: isize) {
+    pub fn exit_switch(&self, exit_code: isize) -> ! {
+        let proc = self.take_current().unwrap();
+        let mut pcb_inner = proc.get_inner();
+        pcb_inner.status = ProcessStatus::Zombie;
+        pcb_inner.exit_code = Some(exit_code);
+
+        // let init proc to take all child process
         {
-            let proc = self.take_current().unwrap();
-            let mut pcb_inner = proc.get_inner();
-            pcb_inner.status = ProcessStatus::Zombie;
-            pcb_inner.exit_code = Some(exit_code);
-    
-            // let init proc to take all child process
-            {
-                let mut init_inner = INIT_PROCESS.get_inner();
-                for child in &pcb_inner.children {
-                    child.get_inner().parent = Some(Arc::downgrade(&INIT_PROCESS));
-                    init_inner.children.insert(child.clone());
-                }
+            let mut init_inner = INIT_PROCESS.get_inner();
+            for child in &pcb_inner.children {
+                child.get_inner().parent = Some(Arc::downgrade(&INIT_PROCESS));
+                init_inner.children.insert(child.clone());
             }
-            
-            pcb_inner.children.clear();
         }
-        let mut proc_ctx = ProcessContext::new();
-        let proc_ctx_ptr = &mut proc_ctx as *mut ProcessContext;
-        let idle_context = self.context_ptr();
+        
+        pcb_inner.children.clear();
+        // HACK: this is ugly as hell someone help me fix this pls
         unsafe {
-            __swtch(proc_ctx_ptr, idle_context);
+            // clone, strong count + 1 for this clone will not be dropped but consumed by Arc::into_raw (will be mem::forget()-ed)
+            let proc_raw = Arc::into_raw(proc.clone());
+            // dec proc.clone() count
+            Arc::decrement_strong_count(proc_raw);
+            // dec proc count for we are not able to drop it
+            Arc::decrement_strong_count(proc_raw);
         }
+        self.to_scheduler(pcb_inner);
+        unreachable!()
     }
 
     pub fn activate_mem_layout(&self) {
@@ -219,6 +245,22 @@ impl Processor {
         new_mem_layout.activate();
         self.inner.borrow_mut().sche_mem_layout = Some(new_mem_layout);
         milestone!("Hart {} scheduler memory layout activated.", get_hart_id());
+    }
+
+    pub fn get_int_ena(&self) -> bool {
+        self.inner.borrow().int_enable_b4_off
+    }
+
+    pub fn set_int_ena(&self, ena: bool) {
+        self.inner.borrow_mut().int_enable_b4_off = ena;
+    }
+
+    pub fn get_int_cnt(&self) -> usize {
+        self.inner.borrow().int_off_count
+    }
+
+    pub fn set_int_cnt(&self, cnt: usize) {
+        self.inner.borrow_mut().int_off_count = cnt;
     }
 }
 
@@ -265,9 +307,9 @@ impl ProcessorInner {
         }
     }
     
-    pub fn context_ptr(&mut self) -> *mut ProcessContext {
+    pub fn get_context(&mut self) -> *mut ProcessContext {
         // use identical mapping.
-        &mut self.idle_context
+        (&mut self.idle_context) as *mut ProcessContext
     }
 }
 
@@ -288,18 +330,15 @@ pub fn get_processor() -> Arc<Processor> {
 
 // TODO: Change this to RAII style (IntrGuard with new and Drop)
 pub fn push_intr_off() {
-    // intr off, then lock
     let intr_state = sstatus::read().sie();
-    unsafe {
-        sstatus::clear_sie();
-    }
+    intr_off();
     get_processor().register_push_off(intr_state);
 }
 
 pub fn pop_intr_off() {
-    // unlock, then intr on
+    assert!(!sstatus::read().sie(), "Int was on");
     if get_processor().register_pop_off() {
-        unsafe {sstatus::set_sie()};
+        intr_on();
     }
 }
 

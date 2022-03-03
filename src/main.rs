@@ -104,7 +104,7 @@ extern "C" fn genesis_m(hart_id: usize) -> ! {
         sie::set_utimer();
         // set phys addr protection
         pmpaddr0::write(0x3fffffffffffffusize);
-        pmpcfg0::write(0xfusize);
+        pmpcfg0::write(0x1fusize);
         HART_REGISTER[hart_id] = true;
         // set timer interrupt and set up mscratch
         // mscratch for the cpu will store registers used in timervec

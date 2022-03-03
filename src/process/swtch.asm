@@ -12,7 +12,7 @@
 __swtch:
     # __swtch(
     #     current_context: *mut ProcessContext,
-    #     next_context: *mut ProcessContext
+    #     next_context: *const ProcessContext
     # )
     # push ProcessContext to current sp and save its address to where a0 points to
     

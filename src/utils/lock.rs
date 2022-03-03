@@ -11,6 +11,10 @@ pub trait Mutex<T> {
     fn release(&self);
     fn get_data(&self) -> &mut T;
     fn get_name(&self) -> String;
+    fn locked(&self) -> bool;
+    unsafe fn force_relock(&self);
+    unsafe fn force_unlock(&self);
+    unsafe fn from_locked(&self) -> MutexGuard<'_, T>;
 }
 
 pub struct MutexGuard<'a, T> {
@@ -36,6 +40,22 @@ impl<T> Drop for MutexGuard<'_, T> {
     }
 }
 
+impl<T> MutexGuard<'_, T> {
+    pub unsafe fn force_relock(&self) {
+        self.mutex.force_relock();
+    }
+
+    pub unsafe fn force_unlock(&self) {
+        self.mutex.force_unlock();
+    }
+
+    pub fn check_intergrity(&self) {
+        if !self.mutex.locked() {
+            panic!("MutexGuard compromised.");
+        }
+    }
+}
+
 // TODO: Implement R/W lock
 pub struct SpinMutex<T> {
     is_acquired  : AtomicBool,
@@ -53,17 +73,6 @@ impl<T> SpinMutex<T> {
             did_push_off: UnsafeCell::new(true)
         }
     }
-    
-    pub fn acquire_no_off(&self) -> MutexGuard<'_, T> {
-        push_intr_off();
-        while self.is_acquired.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
-            // spin wait
-        }
-        // change after lock has been successfully acquired, thus refcell is safe to change
-        unsafe{*self.did_push_off.get() = false;}
-        pop_intr_off();
-        MutexGuard{mutex: self}
-    }
 }
 
 impl<T> Mutex<T> for SpinMutex<T> {
@@ -78,7 +87,7 @@ impl<T> Mutex<T> for SpinMutex<T> {
     }
 
     fn release(&self) {
-        self.is_acquired.store(false, Ordering::Release);
+        unsafe {self.force_unlock();}
         if unsafe{*self.did_push_off.get()} {
             pop_intr_off();
         }
@@ -90,6 +99,28 @@ impl<T> Mutex<T> for SpinMutex<T> {
 
     fn get_name(&self) -> String{
         self.name.clone()
+    }
+
+    fn locked(&self) -> bool {
+        self.is_acquired.load(Ordering::Relaxed)
+    }
+
+    unsafe fn force_relock(&self) {
+        if self.is_acquired.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
+            panic!("Mutex must be unlocked to be force relock")
+        }
+    }
+
+    unsafe fn force_unlock(&self) {
+        if self.is_acquired.compare_exchange(true, false, Ordering::SeqCst, Ordering::SeqCst).is_err() {
+            panic!("Mutex must be locked to be force unlock")
+        }
+    }
+
+    unsafe fn from_locked(&self) -> MutexGuard<'_, T> {
+        let result = MutexGuard{mutex: self};
+        result.check_intergrity();
+        result
     }
 }
 
@@ -134,6 +165,28 @@ impl<T> Mutex<T> for SleepMutex<T> {
 
     fn get_name(&self) -> String{
         self.name.clone()
+    }
+
+    fn locked(&self) -> bool {
+        self.is_acquired.load(Ordering::Relaxed)
+    }
+
+    unsafe fn force_relock(&self) {
+        if self.is_acquired.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
+            panic!("Mutex must be unlocked to be force relock")
+        }
+    }
+
+    unsafe fn force_unlock(&self) {
+        if self.is_acquired.compare_exchange(true, false, Ordering::SeqCst, Ordering::SeqCst).is_err() {
+            panic!("Mutex must be locked to be force unlock")
+        }
+    }
+
+    unsafe fn from_locked(&self) -> MutexGuard<'_, T> {
+        let result = MutexGuard{mutex: self};
+        result.check_intergrity();
+        result
     }
 }
 

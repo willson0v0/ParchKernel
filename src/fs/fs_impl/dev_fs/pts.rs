@@ -30,6 +30,7 @@ impl File for UartPTS {
     }
 
     fn read(&self, length: usize) -> Result<alloc::vec::Vec<u8>, crate::utils::ErrorNum> {
+        // FIXME: change to read_bytes, fix UART0.sync() and plic interrupt.
         Ok(UART0.read_bytes(length))
     }
 

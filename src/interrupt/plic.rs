@@ -33,7 +33,9 @@ impl PLIC {
         let hart = get_hart_id();
         let plic_senable = self.address + 0x2080usize + hart * 0x100usize;
         let plic_spriority = self.address + 0x201000usize + hart * 0x2000usize;
-        let mut bits = 0usize;
+        debug!("PLIC S Enable:   {:?}", plic_senable);
+        debug!("PLIC S Priority: {:?}", plic_spriority);
+        let mut bits = 0u32;
         for irq in irqs {
             bits |= 1 << irq;
         }
@@ -41,7 +43,7 @@ impl PLIC {
             // enable S-mode irq
             plic_senable.write_volatile(&bits);
             // set S-mode irq priority threshold to 0
-            plic_spriority.write_volatile(&0usize);
+            plic_spriority.write_volatile(&0u32);
         }
     }
 

@@ -126,6 +126,7 @@ static LOG_TITLE: &'static [&str] = &[
 ];
 
 pub fn do_log(log_level: LogLevel, args: fmt::Arguments) {
+    let guard = PRINT_LOCK.acquire();
     print_no_lock!("\x1b[{};{}m{}", LOG_FG_COLOURS[log_level.to_num()], LOG_BG_COLOURS[log_level.to_num()], LOG_TITLE[log_level.to_num()]);
     print_no_lock!("[{:>10.5}] on hart {}: ", get_time_second(), get_hart_id());
     print_no_lock(args);
@@ -134,7 +135,6 @@ pub fn do_log(log_level: LogLevel, args: fmt::Arguments) {
 
 
 pub fn log(log_level: LogLevel, args: fmt::Arguments) {
-    let guard = PRINT_LOCK.acquire();
     match log_level {
         LogLevel::Verbose => {
             if cfg!(feature = "log_verbose") {

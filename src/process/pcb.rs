@@ -8,7 +8,7 @@ use super::{ProcessID, new_pid, processor::ProcessContext, SignalNum};
 
 #[derive(PartialEq, Eq)]
 pub enum ProcessStatus {
-    Initialized,
+    Init,
     Ready,
     Running,
     Zombie
@@ -16,7 +16,7 @@ pub enum ProcessStatus {
 
 pub struct ProcessControlBlock {
     pub pid: ProcessID,
-    inner: SpinMutex<PCBInner>
+    pub inner: SpinMutex<PCBInner>
 }
 
 impl Eq for ProcessControlBlock {}
@@ -110,7 +110,7 @@ impl PCBInner {
         Self {
             elf_file,
             mem_layout,
-            status: ProcessStatus::Initialized,
+            status: ProcessStatus::Init,
             entry_point: 0.into(),
             proc_context: ProcessContext::new(),
             files: Self::default_fds().unwrap(),
@@ -205,10 +205,9 @@ impl PCBInner {
         signal_mask.insert(SignalNum::SIGSYS   , true);
         signal_mask
     }
-
-    pub fn context_ptr(&mut self) -> *mut ProcessContext {
-        // use identical mapping.
-        &mut self.proc_context
+    
+    pub fn get_context(&mut self) -> *mut ProcessContext {
+        (&mut self.proc_context) as *mut ProcessContext
     }
 
     pub fn fork(&self) -> Result<Self, ErrorNum> {
