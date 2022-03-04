@@ -1,5 +1,6 @@
 use core::arch::{asm, global_asm};
 use core::cell::RefCell;
+use core::ops::Deref;
 
 
 use riscv::register::{
@@ -60,7 +61,6 @@ impl ProcessorManager {
     }
 
     pub fn get_processor(&self, hart: usize) -> Arc<Processor> {
-        assert!(get_hart_id() == hart, "CPUManager Access violation");
         self.processor_list[hart].clone()
     }
 }
@@ -95,6 +95,45 @@ pub struct ProcessorInner {
     pub sche_mem_layout: Option<MemLayout>
 }
 
+pub struct ProcessorGuard {
+    processor: Arc<Processor>
+}
+
+impl Deref for ProcessorGuard {
+    type Target = Processor;
+    fn deref(&self) -> &Self::Target {
+        assert!(get_hart_id() == self.processor.hart_id, "CPU access vioaltion");
+        assert!(!sstatus::read().sie(), "Interrupt on");
+        self.processor.deref()
+    }
+}
+
+impl Drop for ProcessorGuard {
+    fn drop(&mut self) {
+        // avoid deref check for it might be back from get_processor.suspend_switch().
+        // only drop is explicitly allowed.
+        assert!(!sstatus::read().sie(), "Interrupt on");
+        let processor = PROCESSOR_MANAGER.get_processor(get_hart_id());
+        if processor.register_pop_off() {
+            intr_on();
+        }
+    }
+}
+
+impl ProcessorGuard {
+    pub fn new() -> Self {
+        let intr_state = sstatus::read().sie();
+        intr_off();
+        let processor = PROCESSOR_MANAGER.get_processor(get_hart_id());
+        processor.register_push_off(intr_state);
+        Self {processor}
+    }
+
+    pub fn ref_cnt(&self) -> usize {
+        Arc::strong_count(&self.processor)
+    }
+}
+
 impl Processor {
     pub fn new(hart_id: usize) -> Self {
         Self {
@@ -102,15 +141,9 @@ impl Processor {
             inner: RefCell::new(ProcessorInner::new())
         }
     }
-
-    /// WARN: Don't use these! use push/pop_intr_off!
-    pub fn register_push_off(&self, intr_state_b4: bool) {
-        // self.inner.borrow_mut().register_push_off(intr_state_b4);
-        let res =  self.inner.try_borrow_mut();
-        match res {
-            Ok(mut inner) => {inner.register_push_off(intr_state_b4)},
-            Err(err) => {panic!("wtf @ {:?}", err)}
-        }
+    
+    pub fn register_push_off(&self, intr_state: bool) {
+        self.inner.borrow_mut().register_push_off(intr_state);
     }
 
     pub fn register_pop_off(&self) -> bool {
@@ -184,7 +217,9 @@ impl Processor {
         proc_inner.check_intergrity();
         assert!(proc_inner.status != ProcessStatus::Running, "Current thread must not be running");
         assert!(self.intr_state() == false, "Interrupt must be off to switch to scheduler.");
-        assert!(self.get_int_cnt() == 1, "Must only hold one lock when switching to scheduler.");
+        // one int for one lock, another for ProcessorGuard
+        // assert!(self.get_int_cnt() == 2, "Must only hold one lock when switching to scheduler.");
+        // assert!(get_processor().ref_cnt() == 2, "Must not hold processor guard.");
         let idle_context = self.get_context();
         let proc_context = proc_inner.get_context();
         unsafe {
@@ -194,8 +229,9 @@ impl Processor {
     }
     
     pub fn suspend_switch(&self) {
-        let int_ena = get_processor().get_int_ena();
-        let int_cnt = get_processor().get_int_cnt();
+        let processor = get_processor();
+        let int_ena = processor.get_int_ena();
+        let int_cnt = processor.get_int_cnt();
 
         let process = self.take_current().expect("Suspend switch need running process to work");
         let mut pcb_inner = process.get_inner();
@@ -203,10 +239,12 @@ impl Processor {
         enqueue(process.clone());
 
         // pcb_inner was locked for scheduler
+        drop(processor);
         self.to_scheduler(pcb_inner);
 
-        get_processor().set_int_cnt(int_cnt);
-        get_processor().set_int_ena(int_ena);
+        let processor = get_processor();
+        processor.set_int_cnt(int_cnt);
+        processor.set_int_ena(int_ena);
     }
 
     pub fn exit_switch(&self, exit_code: isize) -> ! {
@@ -324,8 +362,8 @@ pub fn get_hart_id() -> usize {
     hart_id
 }
 
-pub fn get_processor() -> Arc<Processor> {
-    return PROCESSOR_MANAGER.get_processor(get_hart_id());
+pub fn get_processor() -> ProcessorGuard {
+    ProcessorGuard::new()
 }
 
 // TODO: Change this to RAII style (IntrGuard with new and Drop)

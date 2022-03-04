@@ -57,7 +57,7 @@ lazy_static!{
 
 // ======================== functions ========================
 pub fn k_puts(ch: &str) {
-	UART0.write_synced(ch);
+	UART0.write_str_synced(ch);
 }
 
 struct  OutputFormatter;

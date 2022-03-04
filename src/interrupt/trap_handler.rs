@@ -116,6 +116,7 @@ pub fn user_trap() -> ! {
     trap_context.epc = sepc.into();
 
     assert!(sstatus.spp() == SPP::User, "user_trap not from user mode");
+    assert!(!sstatus.sie(), "kernel interrupt is enabled");
 
     match scause.cause() {
         Trap::Exception(Exception::UserEnvCall) => {
@@ -213,7 +214,8 @@ pub fn user_trap() -> ! {
 #[no_mangle]
 pub fn fork_return() -> ! {
     {
-        let pcb = get_processor().current().unwrap();
+        let processor = get_processor();
+        let pcb = processor.current().unwrap();
         let mut pcb_inner = unsafe {pcb.inner.from_locked()};
         if pcb_inner.status == ProcessStatus::Init {
             let trap_context = TrapContext::current_ref();
@@ -232,42 +234,46 @@ pub fn fork_return() -> ! {
 
 #[no_mangle]
 pub fn trap_return() -> ! {
-    intr_off();
-    let pcb = get_processor().current().unwrap();
-    let mut pcb_inner = pcb.get_inner();
-    let trap_context = TrapContext::current_ref();
-    trap_context.kernel_sp = PROC_K_STACK_ADDR + PROC_K_STACK_SIZE;
-    trap_context.user_trap = (user_trap as usize).into();
-    trap_context.hart_id = get_hart_id();
     extern "C" {
         fn uservec();
         fn userret();
         fn trampoline();
     }
-    let uservec_addr: VirtAddr = TRAMPOLINE_ADDR + ((uservec as usize) - (trampoline as usize));
-    let userret_addr: VirtAddr = TRAMPOLINE_ADDR + ((userret as usize) - (trampoline as usize));
-
-    // Process pending signal
-    // current TrapContext will be archieved
-    // new TrapContext will have epc = SignalHandlerVA, ra = __user_restore_from_handler in UTrampoline
-    if pcb_inner.pending_signal.len() > 0 {
-        let signal = pcb_inner.pending_signal.pop_front().unwrap();
-        debug!("Processing signal {:?} for process {:?}", signal, pcb.pid);
-        pcb_inner.signal_contexts.push(trap_context.clone());
-        
-        extern "C" {fn sutrampoline(); }
-        let ignore_va = U_TRAMPOLINE_ADDR + (def_ignore as usize - sutrampoline as usize);
-        trap_context.ra = ignore_va.0;
-        trap_context.epc = pcb_inner.signal_handler.get(&signal).unwrap().to_owned();
+    {
+        intr_off();
+        let pcb = get_processor().current().unwrap();
+        let mut pcb_inner = pcb.get_inner();
+        let trap_context = TrapContext::current_ref();
+        trap_context.kernel_sp = PROC_K_STACK_ADDR + PROC_K_STACK_SIZE;
+        trap_context.user_trap = (user_trap as usize).into();
+        trap_context.hart_id = get_hart_id();
+        let uservec_addr: VirtAddr = TRAMPOLINE_ADDR + ((uservec as usize) - (trampoline as usize));
+    
+        // Process pending signal
+        // current TrapContext will be archieved
+        // new TrapContext will have epc = SignalHandlerVA, ra = __user_restore_from_handler in UTrampoline
+        if pcb_inner.pending_signal.len() > 0 {
+            let signal = pcb_inner.pending_signal.pop_front().unwrap();
+            debug!("Processing signal {:?} for process {:?}", signal, pcb.pid);
+            pcb_inner.signal_contexts.push(trap_context.clone());
+            
+            extern "C" {fn sutrampoline(); }
+            let ignore_va = U_TRAMPOLINE_ADDR + (def_ignore as usize - sutrampoline as usize);
+            trap_context.ra = ignore_va.0;
+            trap_context.epc = pcb_inner.signal_handler.get(&signal).unwrap().to_owned();
+        }
+    
+        drop(pcb_inner);
+        unsafe {
+            stvec::write(uservec_addr.0, stvec::TrapMode::Direct);
+            sstatus::set_spie();
+            sstatus::set_spp(SPP::User);
+            sepc::write(trap_context.epc.0);
+        }
     }
-
-    drop(pcb_inner);
+    let userret_addr: VirtAddr = TRAMPOLINE_ADDR + ((userret as usize) - (trampoline as usize));
     unsafe {
         let userret_fp: extern "C" fn(VirtAddr) -> ! = core::mem::transmute(userret_addr.0 as *const ());
-        stvec::write(uservec_addr.0, stvec::TrapMode::Direct);
-        sstatus::set_spie();
-        sstatus::set_spp(SPP::User);
-        sepc::write(trap_context.epc.0);
         userret_fp(TRAP_CONTEXT_ADDR);
     }
 }

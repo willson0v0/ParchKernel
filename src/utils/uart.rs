@@ -148,23 +148,24 @@ impl Uart {
     }
 
     /// Write to UART, using it's interrupt
-    pub fn write(&self, data: &str) {
-        self.write_data(data.as_bytes());
+    pub fn write_str(&self, data: &str) {
+        self.write_bytes(data.as_bytes());
     }
 
-    pub fn write_data(&self, data: &[u8]) {
+    pub fn write_bytes(&self, data: &[u8]) {
         let mut inner = self.inner.acquire();
         while inner.write_buffer.len() >= 1024 {
-            // drop(inner);
-            // get_processor().suspend_switch();
-            // inner = self.inner.acquire();
+            drop(inner);
+            get_processor().suspend_switch();
+            inner = self.inner.acquire();
         }
         inner.write_bytes(data);
         inner.sync();
     }
 
     /// kernel will use this to send output
-    pub fn write_synced(&self, data: &str) {
+    /// no write_bystes_synced because kernel wont do this.
+    pub fn write_str_synced(&self, data: &str) {
         // prevent trap get inner deadlocked
         self.inner.acquire().write_synced(data);
     }
@@ -251,6 +252,7 @@ impl Uart {
 
     pub fn read_byte(&self) -> u8 {
         let mut inner = self.inner.acquire();
+        inner.sync();
         // waiting for irq
         while inner.read_buffer.len() == 0 {
             drop(inner);
@@ -266,7 +268,6 @@ impl Uart {
     }
 
     pub fn read_bytes(&self, length: usize) -> Vec<u8> {
-        self.sync();
         let mut res = Vec::new();
         while res.len() < length {
             res.push(self.read_byte());

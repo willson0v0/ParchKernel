@@ -25,7 +25,7 @@ impl Debug for UartPTS {
 
 impl File for UartPTS {
     fn write(&self, data: alloc::vec::Vec::<u8>) -> Result<usize, crate::utils::ErrorNum> {
-        UART0.write_data(&data);
+        UART0.write_bytes(&data);
         Ok(data.len())
     }
 

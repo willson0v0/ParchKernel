@@ -157,7 +157,6 @@ extern "C" fn genesis_s() -> ! {
         interrupt::init_hart();
     }
     
-    process::intr_on();
     process::hart_init();
     
     unreachable!();
