@@ -31,4 +31,5 @@ pub const TIMER_FRAC		: usize = 10;	// trigger every 100ms
 
 pub const INIT_PROCESS_PATH      : &str = "/init_proc";
 
-pub const MAX_FD    : usize = 4096;
+pub const MAX_FD            : usize = 4096;
+pub const MAX_SYSCALL       : usize = 64;

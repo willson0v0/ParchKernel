@@ -11,8 +11,8 @@ pub trait StepDown {
 #[derive(Copy, Clone)]
 pub struct Range<T> where 
     T: StepUp + StepDown + Copy + PartialEq + PartialOrd + Debug, {
-    start: T,
-    end: T,
+    pub start: T,
+    pub end: T,
 }
 
 impl <T> Range<T> where T: StepUp + StepDown + Copy + PartialEq + PartialOrd + Debug {

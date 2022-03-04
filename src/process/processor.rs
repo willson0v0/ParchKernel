@@ -180,7 +180,6 @@ impl Processor {
         loop {
             intr_on();
             if let Some(proc) = dequeue() {
-                verbose!("Found available process {}", proc.pid);
                 let mut pcb_inner = proc.get_inner();
                 assert!(pcb_inner.status == ProcessStatus::Ready || pcb_inner.status == ProcessStatus::Init);
                 if pcb_inner.status != ProcessStatus::Init {
@@ -202,7 +201,6 @@ impl Processor {
                 }
                 pcb_inner.check_intergrity();
             } else {
-                verbose!("No available process. Processor IDLE.");
                 self.stall();
             }
         }
@@ -366,7 +364,7 @@ pub fn get_processor() -> ProcessorGuard {
     ProcessorGuard::new()
 }
 
-// TODO: Change this to RAII style (IntrGuard with new and Drop)
+// NOTE: can use ProcessorGuard as RAII version of push_intr_on / off.
 pub fn push_intr_off() {
     let intr_state = sstatus::read().sie();
     intr_off();

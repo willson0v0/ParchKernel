@@ -2,7 +2,7 @@ use core::{mem::size_of, cmp::Ordering};
 
 use alloc::{sync::{Arc, Weak}, collections::{BTreeMap, VecDeque, BTreeSet}, vec::Vec};
 
-use crate::{mem::{MemLayout, VirtAddr, VirtPageNum}, utils::{SpinMutex, MutexGuard, Mutex, ErrorNum}, fs::{Path, open, OpenMode, RegularFile, File}, interrupt::trap_context::TrapContext, config::{TRAP_CONTEXT_ADDR, PROC_U_STACK_ADDR, PROC_U_STACK_SIZE, U_TRAMPOLINE_ADDR, MAX_FD}, process::{def_handler::*, push_sum_on, pop_sum_on}};
+use crate::{mem::{MemLayout, VirtAddr, VirtPageNum}, utils::{SpinMutex, MutexGuard, Mutex, ErrorNum}, fs::{Path, open, OpenMode, RegularFile, File}, interrupt::trap_context::TrapContext, config::{TRAP_CONTEXT_ADDR, PROC_U_STACK_ADDR, PROC_U_STACK_SIZE, U_TRAMPOLINE_ADDR, MAX_FD, MAX_SYSCALL}, process::{def_handler::*, push_sum_on, pop_sum_on}, syscall::syscall_num::{SYSCALL_WRITE, SYSCALL_READ}};
 
 use super::{ProcessID, new_pid, processor::ProcessContext, SignalNum};
 
@@ -55,6 +55,7 @@ pub struct PCBInner {
     pub status: ProcessStatus,
     pub proc_context: ProcessContext,
     pub entry_point: VirtAddr,
+    pub data_end: VirtAddr,
     pub files: BTreeMap<FileDescriptor, Arc<dyn File>>,
     pub signal_handler: BTreeMap<SignalNum, VirtAddr>,
     pub pending_signal: VecDeque<SignalNum>,
@@ -64,7 +65,7 @@ pub struct PCBInner {
     pub parent: Option<Weak<ProcessControlBlock>>,
     pub exit_code: Option<isize>,
     pub cwd: Path,
-    pub trace: bool
+    pub trace_enabled: [bool; MAX_SYSCALL]
 }
 
 impl ProcessControlBlock {
@@ -103,6 +104,17 @@ impl PCBInner {
         Ok(files)
     }
 
+    fn default_trace() -> [bool; MAX_SYSCALL] {
+        if cfg!(debug_assertions) {
+            let mut res = [true; MAX_SYSCALL];
+            res[SYSCALL_WRITE] = false;
+            res[SYSCALL_READ] = false;
+            res
+        } else {
+            [false; MAX_SYSCALL]
+        }
+    }
+
     pub fn new(mem_layout: MemLayout, elf_file: Arc<dyn RegularFile>) -> Self {
         let signal_handler = Self::default_hander();
         let signal_enable = Self::defualt_mask();
@@ -112,9 +124,10 @@ impl PCBInner {
             mem_layout,
             status: ProcessStatus::Init,
             entry_point: 0.into(),
+            data_end: 0.into(),
             proc_context: ProcessContext::new(),
             files: Self::default_fds().unwrap(),
-            trace: false,
+            trace_enabled: Self::default_trace(),
             signal_handler,
             signal_contexts: Vec::new(),
             signal_enable,
@@ -217,8 +230,9 @@ impl PCBInner {
             status: ProcessStatus::Ready,
             proc_context: ProcessContext::new(),
             entry_point: self.entry_point,
+            data_end: self.data_end,
             files: self.files.clone(),
-            trace: self.trace,
+            trace_enabled: self.trace_enabled.clone(),
             signal_contexts: Vec::new(),
             signal_handler: self.signal_handler.clone(),    // save signal handler
             signal_enable: self.signal_enable.clone(),
@@ -276,13 +290,14 @@ impl PCBInner {
     pub fn exec(&mut self, elf_file: Arc<dyn RegularFile>, args: Vec<Vec<u8>>) -> Result<(), ErrorNum> {
         assert!(self.status == ProcessStatus::Running, "Exec on process that is not running");
         self.mem_layout.reset()?;
-        let entry = self.mem_layout.map_elf(elf_file.clone())?;
+        let (entry, data) = self.mem_layout.map_elf(elf_file.clone())?;
         self.mem_layout.do_map();
         verbose!("mem_layout done");
         self.elf_file = elf_file.clone();
         self.entry_point = entry;
+        self.data_end = data;
         self.files = Self::default_fds()?;
-        self.trace = false;
+        self.trace_enabled = Self::default_trace();
         self.signal_contexts.clear();
         self.signal_handler = Self::default_hander();
         self.signal_enable = Self::defualt_mask();

@@ -49,7 +49,7 @@ pub fn kernel_trap() {
             }
         },
         Trap::Interrupt(Interrupt::SupervisorSoft) => {
-            verbose!("Supervisor Soft Interrupt");
+            // verbose!("Supervisor Soft Interrupt");
             // riscv::register::sip
             // for some reason sip was not provided with write interface...
             let cleared_sip = sip::read().bits() & !2;
@@ -220,7 +220,7 @@ pub fn fork_return() -> ! {
         if pcb_inner.status == ProcessStatus::Init {
             let trap_context = TrapContext::current_ref();
             let elf_file = pcb_inner.elf_file.clone();
-            pcb_inner.entry_point = pcb_inner.mem_layout.map_elf(elf_file).unwrap();
+            (pcb_inner.entry_point, pcb_inner.data_end) = pcb_inner.mem_layout.map_elf(elf_file).unwrap();
             pcb_inner.status = ProcessStatus::Running;
             *trap_context = TrapContext::new();
             trap_context.epc = pcb_inner.entry_point;

@@ -14,3 +14,4 @@ pub const SYSCALL_SIGACTION : usize =  12;
 pub const SYSCALL_SIGRETURN : usize =  13;
 pub const SYSCALL_GETCWD    : usize =  14;
 pub const SYSCALL_CHDIR     : usize =  15;
+pub const SYSCALL_SBRK      : usize =  16;

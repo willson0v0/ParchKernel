@@ -2,11 +2,13 @@ use core::fmt::{self, Debug, Formatter};
 
 use core::cmp::min;
 use core::ops::{Deref, DerefMut};
+use alloc::string::String;
 use alloc::{sync::{Arc}, collections::BTreeMap, vec::Vec, borrow::ToOwned};
 use bitflags::*;
 use crate::{config::{PAGE_SIZE, PROC_K_STACK_SIZE, PROC_K_STACK_ADDR, PROC_U_STACK_SIZE, PROC_U_STACK_ADDR}, utils::{SpinMutex, Mutex}};
 use crate::{fs::{RegularFile}, utils::ErrorNum, config::{TRAMPOLINE_ADDR, U_TRAMPOLINE_ADDR, TRAP_CONTEXT_ADDR}};
 
+use super::VirtAddr;
 use super::{types::{VPNRange, VirtPageNum, PhysPageNum}, PageGuard, pagetable::{PageTable, PTEFlags}, alloc_vm_page, PhysAddr};
 
 
@@ -139,6 +141,7 @@ struct IdenticalMappingSegmentInner {
 pub struct ManagedSegment (pub SpinMutex<ManagedSegmentInner>);
 pub struct ManagedSegmentInner {
     range: VPNRange,
+    byte_len: usize,
     frames: BTreeMap<VirtPageNum, PageGuard>,
     flag: SegmentFlags,
     status: SegmentStatus,
@@ -362,7 +365,7 @@ impl Segment for ManagedSegment {
 
     fn clone_seg(self: Arc<Self>) -> Result<ArcSegment, ErrorNum> {
         let inner = self.0.acquire();
-        Ok(Self::new(inner.range, inner.flag, Some(self.clone())))
+        Ok(Self::new(inner.range, inner.flag, Some(self.clone()), inner.byte_len))
     }
 }
 
@@ -766,9 +769,10 @@ impl IdenticalMappingSegment {
 }
 
 impl ManagedSegment {
-    pub fn new(range: VPNRange, flag: SegmentFlags, clone_source: Option<Arc<ManagedSegment>>) -> ArcSegment {
-        Arc::new(Self( SpinMutex::new("Segment lock", ManagedSegmentInner{
+    pub fn new(range: VPNRange, flag: SegmentFlags, clone_source: Option<Arc<ManagedSegment>>, byte_len: usize) -> ArcSegment {
+        Arc::new(Self( SpinMutex::new("Segment lock", ManagedSegmentInner {
             range,
+            byte_len,
             frames: BTreeMap::new(),
             flag,
             status: SegmentStatus::Initialized,
@@ -787,6 +791,49 @@ impl ManagedSegment {
             pagetable.remap(vpn, ppn, flag.into());
         }
         original_flag
+    }
+
+    pub fn grow(&self, increment: usize, pagetable: &mut PageTable) -> Result<VirtAddr, ErrorNum> {
+        let mut inner = self.0.acquire();
+        let mut map_iter = inner.range.end();
+        let tgt_va: VirtAddr = VirtAddr::from(inner.range.start()) + inner.byte_len + increment;
+        info!("Growing managed segment, original end {:?}, original length {}, increment {}", inner.range.end(), inner.byte_len, increment);
+        while tgt_va.to_vpn_ceil() >= map_iter {
+            debug!("Mapping vpn {:?}", map_iter);
+            let pg = alloc_vm_page();
+            let ppn = pg.ppn;
+            pagetable.map(map_iter, ppn, inner.flag.into());
+            inner.frames.insert(map_iter, pg);
+            map_iter = map_iter + 1;
+        }
+        inner.byte_len = inner.byte_len + increment;
+        inner.range.end = map_iter;
+        info!("Grow done, new end {:?}, new length {}", inner.range.end(), inner.byte_len);
+        Ok(VirtAddr::from(inner.range.start()) + inner.byte_len)
+    }
+
+    pub fn shrink(&self, decrement: usize, pagetable: &mut PageTable) -> Result<VirtAddr, ErrorNum> {
+        let mut inner = self.0.acquire();
+        let mut map_iter = inner.range.end() - 1;
+        let tgt_va: VirtAddr = VirtAddr::from(inner.range.start()) + inner.byte_len - decrement;
+        info!("Shrinking managed segment, original end {:?}, decrement {}", inner.range.end(), decrement);
+        while tgt_va.to_vpn_ceil() < map_iter {
+            debug!("Unapping vpn {:?}", map_iter);
+            // remove pg
+            inner.frames.remove(&map_iter).unwrap();
+            pagetable.unmap(map_iter);
+            map_iter = map_iter - 1;
+        }
+        inner.byte_len = inner.byte_len - decrement;
+        inner.range.end = map_iter;
+        info!("Grow done, new end {:?}, new length {}", inner.range.end(), inner.byte_len);
+        Ok(VirtAddr::from(inner.range.start()) + inner.byte_len)
+
+    }
+
+    pub fn get_end_va(&self) -> VirtAddr {
+        let inner = self.0.acquire();
+        VirtAddr::from(inner.range.start()) + inner.byte_len
     }
 }
 

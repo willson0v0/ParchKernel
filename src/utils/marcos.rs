@@ -1,32 +1,30 @@
 #[macro_export]
 macro_rules! CALL_SYSCALL {
-    ( $syscall_name: expr ) => {
+    ( $do_trace: expr, $syscall_name: expr ) => {
         {
             let process = crate::process::get_processor().current().unwrap();
-            let do_trace = process.get_inner().trace;
-            if do_trace {
-                debug!("/========== SYSCALL {} CALLED BY {:?} ==========\\", stringify!($syscall_name), process.pid);
+            if $do_trace {
+                info!("SYSCALL {} CALLED BY {:?}", stringify!($syscall_name), process.pid);
             }
             let ret = $syscall_name();
-            if do_trace {
-                debug!("\\= SYSCALL {} CALLED BY {} RESULT {:<10?} =/", stringify!($syscall_name), process.pid, ret);
+            if $do_trace {
+                info!("SYSCALL {} CALLED BY {:?} RESULT {:?}", stringify!($syscall_name), process.pid, ret);
             }
             ret
         }
     };
-    ( $syscall_name: expr, $($y:expr),+ ) => {
+    ( $do_trace: expr, $syscall_name: expr, $($y:expr),+ ) => {
         {
             let process = crate::process::get_processor().current().unwrap();
-            let do_trace = process.get_inner().trace;
-            if do_trace {
-                debug!("SYSCALL {} CALLED BY {:?}", stringify!($syscall_name), process.pid);
+            if $do_trace {
+                info!("SYSCALL {} CALLED BY {:?}", stringify!($syscall_name), process.pid);
                 $(
-                    verbose!("{:>25} = {:?}", stringify!{$y}, $y);
+                    debug!("{:>25} = {:?}", stringify!{$y}, $y);
                 )+
             }
             let ret = $syscall_name($($y),+);
-            if do_trace {
-                debug!("SYSCALL {} CALLED BY {:?} RESULT {:?}", stringify!($syscall_name), process.pid, ret);
+            if $do_trace {
+                info!("SYSCALL {} CALLED BY {:?} RESULT {:?}", stringify!($syscall_name), process.pid, ret);
             }
             ret
         }

@@ -1,6 +1,6 @@
 use core::{arch::asm};
 
-use alloc::{vec::Vec, sync::Arc, borrow::ToOwned};
+use alloc::{vec::Vec, sync::Arc, borrow::ToOwned, string::String, collections::BTreeMap};
 use riscv::register::{satp};
 use crate::{utils::{SpinMutex, ErrorNum}, config::{PHYS_END_ADDR, MMIO_RANGES, PAGE_SIZE, PROC_K_STACK_ADDR, TRAMPOLINE_ADDR, U_TRAMPOLINE_ADDR, TRAP_CONTEXT_ADDR, PROC_U_STACK_ADDR}, mem::{TrampolineSegment, UTrampolineSegment, TrapContextSegment, IdenticalMappingSegment, segment::SegmentFlags, VirtAddr, types::VPNRange, ManagedSegment, stat_mem}, fs::RegularFile, process::{get_processor, get_hart_id}};
 use super::{PageTable, Segment, VirtPageNum, ProcKStackSegment, segment::ProcUStackSegment, ArcSegment};
@@ -265,7 +265,7 @@ impl MemLayout {
         }
     }
 
-    pub fn map_elf(&mut self, elf_file: Arc<dyn RegularFile>) -> Result<VirtAddr, ErrorNum> {
+    pub fn map_elf(&mut self, elf_file: Arc<dyn RegularFile>) -> Result<(VirtAddr, VirtAddr), ErrorNum> {
         verbose!("Mapping elf into memory space");
         // first map it for easy reading...
         let first_map = elf_file.clone().register_mmap(self, 0, elf_file.stat()?.file_size)?;
@@ -283,7 +283,16 @@ impl MemLayout {
         
         verbose!("elf Info: {:?}", elf);
         verbose!("Header Info: {:?}", elf.elf_header());
-        for p in elf.program_header_iter() {
+
+        let mut data_end: VirtAddr = 0.into();
+        for h in elf.section_header_iter() {
+            let mapping = String::from_utf8(h.section_name().to_vec()).map_err(|_| ErrorNum::ENOEXEC)?;
+            if mapping.contains("data") {
+                data_end = ((h.addr() + h.size()) as usize).into();
+            }
+        }
+
+        for (idx, p) in elf.program_header_iter().enumerate() {
             verbose!("Handling PH {:x?}", p);
             if p.ph_type() == ProgramType::LOAD {
                 let seg_start: VirtAddr = (p.vaddr() as usize).into();
@@ -303,7 +312,12 @@ impl MemLayout {
                 if p.flags().contains(ProgramHeaderFlags::WRITE) {
                     seg_flag = seg_flag | SegmentFlags::W;
                 }
-                let segment = ManagedSegment::new(VPNRange::new(seg_start, seg_end + 1), SegmentFlags::W | SegmentFlags::R, None);
+                let segment = ManagedSegment::new(
+                    VPNRange::new(seg_start, seg_end + 1), 
+                    SegmentFlags::W | SegmentFlags::R, 
+                    None,
+                    p.memsz() as usize
+                );
                 self.register_segment(segment.clone());
                 self.do_map();
                 // copy data into it
@@ -317,7 +331,7 @@ impl MemLayout {
         let entry_point = elf.entry_point() as usize;
         // free the first mmap...
         self.remove_segment_by_vpn(first_map)?;
-        Ok(entry_point.into())
+        Ok((entry_point.into(), data_end.into()))
     }
 
     pub fn fork(&self) -> Result<Self, ErrorNum> {
