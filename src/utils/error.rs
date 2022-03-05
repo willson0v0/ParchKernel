@@ -284,6 +284,8 @@ pub enum ErrorNum {
     ENOSIG          = 1008,
     /// signal was diabled by target
     ESIGDISABLED    = 1009,
+    /// Bad codex
+    EBADCODEX       = 1010,
 }
 
 impl ErrorNum {

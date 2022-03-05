@@ -183,7 +183,8 @@ impl VirtAddr {
         if let Ok(s) = String::from_utf8(bytes) {
             Ok((s, len))
         } else {
-            Err(ErrorNum::ENOENT)
+            warning!("Bad utf-8 sequence.");
+            Err(ErrorNum::EBADCODEX)
         }
     }
 

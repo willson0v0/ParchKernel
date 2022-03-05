@@ -4,7 +4,7 @@ use crate::{mem::{VirtAddr, PhysAddr}, config::TRAP_CONTEXT_ADDR};
 
 
 #[repr(C)]
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct TrapContext {
     pub kernel_sp   : VirtAddr,     /*   0 */   // used by kernel
     pub user_trap   : VirtAddr,     /*   8 */   // used by kernel

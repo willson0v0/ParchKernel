@@ -1,9 +1,9 @@
 
 #![allow(unused)]
 
-use alloc::string::String;
+use alloc::{string::String, sync::Arc};
 
-use crate::{process::{push_intr_off, pop_intr_off, get_hart_id}, utils::time::{get_time, get_time_ms, get_time_second}, println, print, print_no_lock};
+use crate::{process::{push_intr_off, pop_intr_off, get_hart_id, get_processor}, utils::time::{get_time, get_time_ms, get_time_second}, println, print, print_no_lock};
 
 use super::{UART0, SpinMutex, Mutex};
 use core::fmt::{self, Write};
@@ -127,8 +127,23 @@ static LOG_TITLE: &'static [&str] = &[
 
 pub fn do_log(log_level: LogLevel, args: fmt::Arguments) {
     let guard = PRINT_LOCK.acquire();
-    print_no_lock!("\x1b[{};{}m{}", LOG_FG_COLOURS[log_level.to_num()], LOG_BG_COLOURS[log_level.to_num()], LOG_TITLE[log_level.to_num()]);
-    print_no_lock!("[{:>10.5}] on hart {}: ", get_time_second(), get_hart_id());
+    // print_no_lock!("\x1b[{};{}m{}", LOG_FG_COLOURS[log_level.to_num()], LOG_BG_COLOURS[log_level.to_num()], LOG_TITLE[log_level.to_num()]);
+    // print_no_lock!("[{:>10.5}] on hart {}: ", get_time_second(), get_hart_id());
+    // print_no_lock(args);
+    // print_no_lock!("\x1b[{};{}m\r\n", FG_DEFAULT, BG_DEFAULT)
+    print_no_lock!(
+        "\x1b[{};{}m[ {:>8.5} ] {} h {} p {} : ", 
+        LOG_FG_COLOURS[log_level.to_num()], 
+        LOG_BG_COLOURS[log_level.to_num()], 
+        get_time_second(),
+        LOG_TITLE[log_level.to_num()],
+        get_hart_id(),
+        if let Some(proc) = get_processor().current() {
+            proc.pid.0
+        } else {
+            0
+        }
+    );
     print_no_lock(args);
     print_no_lock!("\x1b[{};{}m\r\n", FG_DEFAULT, BG_DEFAULT)
 }

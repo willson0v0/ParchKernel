@@ -1,6 +1,6 @@
 use core::{mem::size_of, cmp::Ordering};
 
-use alloc::{sync::{Arc, Weak}, collections::{BTreeMap, VecDeque, BTreeSet}, vec::Vec};
+use alloc::{sync::{Arc, Weak}, collections::{BTreeMap, VecDeque, BTreeSet, LinkedList}, vec::Vec};
 
 use crate::{mem::{MemLayout, VirtAddr, VirtPageNum}, utils::{SpinMutex, MutexGuard, Mutex, ErrorNum}, fs::{Path, open, OpenMode, RegularFile, File}, interrupt::trap_context::TrapContext, config::{TRAP_CONTEXT_ADDR, PROC_U_STACK_ADDR, PROC_U_STACK_SIZE, U_TRAMPOLINE_ADDR, MAX_FD, MAX_SYSCALL}, process::{def_handler::*, push_sum_on, pop_sum_on}, syscall::syscall_num::{SYSCALL_WRITE, SYSCALL_READ}};
 
@@ -61,7 +61,7 @@ pub struct PCBInner {
     pub pending_signal: VecDeque<SignalNum>,
     pub signal_contexts: Vec<TrapContext>,
     pub signal_enable: BTreeMap<SignalNum, bool>,
-    pub children: BTreeSet<Arc<ProcessControlBlock>>,
+    pub children: LinkedList<Arc<ProcessControlBlock>>,
     pub parent: Option<Weak<ProcessControlBlock>>,
     pub exit_code: Option<isize>,
     pub cwd: Path,
@@ -87,11 +87,17 @@ impl ProcessControlBlock {
         self.inner.acquire()
     }
 
-    pub fn fork(&self) -> Result<Arc<Self>, ErrorNum> {
+    pub fn fork(self: &Arc<Self>) -> Result<Arc<Self>, ErrorNum> {
         Ok(Arc::new(Self {
             pid: new_pid(),
-            inner: SpinMutex::new("pcb lock", self.get_inner().fork()?)
+            inner: SpinMutex::new("pcb lock", self.get_inner().fork(Arc::downgrade(self))?)
         }))
+    }
+}
+
+impl Drop for ProcessControlBlock {
+    fn drop(&mut self) {
+        warning!("{:?} was freed.", self.pid);
     }
 }
 
@@ -131,7 +137,7 @@ impl PCBInner {
             signal_handler,
             signal_contexts: Vec::new(),
             signal_enable,
-            children: BTreeSet::new(),
+            children: LinkedList::new(),
             parent: None,
             exit_code: None,
             cwd: Path::root(),
@@ -223,7 +229,7 @@ impl PCBInner {
         (&mut self.proc_context) as *mut ProcessContext
     }
 
-    pub fn fork(&self) -> Result<Self, ErrorNum> {
+    pub fn fork(&self, parent: Weak<ProcessControlBlock>) -> Result<Self, ErrorNum> {
         Ok(Self {
             elf_file: self.elf_file.clone(),
             mem_layout: self.mem_layout.fork()?,
@@ -236,8 +242,8 @@ impl PCBInner {
             signal_contexts: Vec::new(),
             signal_handler: self.signal_handler.clone(),    // save signal handler
             signal_enable: self.signal_enable.clone(),
-            children: BTreeSet::new(),
-            parent: None,
+            children: LinkedList::new(),
+            parent: Some(parent),
             exit_code: None,
             cwd: self.cwd.clone(),
             pending_signal: VecDeque::new(),    // clear pending signal
@@ -246,7 +252,7 @@ impl PCBInner {
 
     pub fn trap_context(&self) -> &'static mut TrapContext {
         let vpn: VirtPageNum = TRAP_CONTEXT_ADDR.into();
-        let ppn = self.mem_layout.pagetable.walk_find(vpn).unwrap();
+        let ppn = self.mem_layout.pagetable.translate(vpn).unwrap();
         unsafe{TrapContext::from_pa(ppn.into())}
     }
 

@@ -43,8 +43,10 @@ impl ProcessManagerInner {
         self.process_list.push_back(process);
     }
 
+    /// guard by mutex, intr off, get_hart_id safe.
     pub fn dequeue(&mut self) -> Option<Arc<ProcessControlBlock>> {
         if let Some(proc ) = self.process_list.pop_front() {
+            assert!(self.running_list[get_hart_id()].is_none()); 
             self.running_list[get_hart_id()] = Some(proc.clone());
             Some(proc)
         } else {
@@ -55,7 +57,6 @@ impl ProcessManagerInner {
     pub fn free_current(&mut self) {
         self.running_list[get_hart_id()].take().expect("No process is running.");
     }
-    
 
     pub fn get_process(&mut self, pid: ProcessID) -> Result<Arc<ProcessControlBlock>, ErrorNum> {
         for proc in self.process_list.iter() {

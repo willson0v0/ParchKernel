@@ -178,6 +178,7 @@ impl MemLayout {
     }
 
     pub fn do_map(&mut self) {
+        debug!("Memlayout @ {:?} mapping.", self.pagetable.root_ppn);
         for seg in self.segments.iter() {
             let map_res = seg.do_map(&mut self.pagetable);
             if map_res.is_ok() {
@@ -200,11 +201,11 @@ impl MemLayout {
             fatal!("Failed switch to SV39!");
         } else {
             info!("Kernel virtual memory layout has been activated on core {}.", get_hart_id());
-        }
+        }   
     }
 
     pub fn occupied(&self, vpn: VirtPageNum) -> bool {
-        self.pagetable.walk_find(vpn).is_some()
+        self.pagetable.translate(vpn).is_ok()
     }
 
     // length in byte
@@ -335,15 +336,26 @@ impl MemLayout {
     }
 
     pub fn fork(&self) -> Result<Self, ErrorNum> {
+        debug!("Forking memlayout @ {:?}", self.pagetable.root_ppn);
         let mut layout = Self {
             pagetable: PageTable::new(),
             segments: Vec::new()
         };
+        debug!("New memlayout @ {:?}", layout.pagetable.root_ppn);
 
         for seg in self.segments.iter() {
-            layout.register_segment(seg.clone().clone_seg()?);
+            layout.register_segment(seg.clone_seg()?);
         }
         layout.do_map();
         Ok(layout)
+    }
+
+    pub fn do_lazy(&mut self, vpn: VirtPageNum) -> Result<(), ErrorNum> {
+        for seg in self.segments.iter() {
+            if seg.do_lazy(vpn, &mut self.pagetable).is_ok() {
+                return Ok(());
+            }
+        }
+        Err(ErrorNum::ENOSEG)
     }
 }

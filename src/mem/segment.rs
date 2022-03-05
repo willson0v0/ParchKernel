@@ -50,6 +50,36 @@ pub enum SegmentType {
 }
 
 
+pub enum PageGuardSlot {
+    Lazy,
+    Unmapped,
+    Populated(PageGuard)
+}
+
+impl PageGuardSlot {
+    /// Returns `true` if the page guard slot is [`Populated`].
+    ///
+    /// [`Populated`]: PageGuardSlot::Populated
+    pub fn is_populated(&self) -> bool {
+        matches!(self, Self::Populated(..))
+    }
+
+    /// Returns `true` if the page guard slot is [`Unmapped`].
+    ///
+    /// [`Unmapped`]: PageGuardSlot::Unmapped
+    pub fn is_unmapped(&self) -> bool {
+        matches!(self, Self::Unmapped)
+    }
+
+    /// Returns `true` if the page guard slot is [`Lazy`].
+    ///
+    /// [`Lazy`]: PageGuardSlot::Lazy
+    pub fn is_lazy(&self) -> bool {
+        matches!(self, Self::Lazy)
+    }
+}
+
+
 pub trait Segment: Debug + Send + Sync {
     fn as_segment   <'a>(self: Arc<Self>) -> Arc<dyn Segment + 'a> where Self: 'a;
     fn as_identical <'a>(self: Arc<Self>) -> Result<Arc<IdenticalMappingSegment >, ErrorNum> where Self: 'a;
@@ -61,6 +91,7 @@ pub trait Segment: Debug + Send + Sync {
     fn seg_type(&self) -> SegmentType;
     fn contains(&self, vpn: VirtPageNum) -> bool;
     fn clone_seg(self: Arc<Self>) -> Result<ArcSegment, ErrorNum>;
+    fn do_lazy(&self, vpn: VirtPageNum, pagetable: &mut PageTable) -> Result<(), ErrorNum>;
 }
 
 pub struct ArcSegment(pub Arc<dyn Segment>);
@@ -127,6 +158,9 @@ impl ArcSegment {
     }
     pub fn clone_seg(&self) -> Result<ArcSegment, ErrorNum>{
         self.0.clone().clone_seg()
+    }
+    pub fn do_lazy(&self, vpn: VirtPageNum, pagetable: &mut PageTable) -> Result<(), ErrorNum> {
+        self.0.do_lazy(vpn, pagetable)
     }
 }
 
@@ -214,35 +248,35 @@ impl Debug for VMASegment {
 impl Debug for TrampolineSegment {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let inner = self.0.acquire();
-        f.write_fmt(format_args!("{:?} Trampoline segment", inner.status))
+        f.write_fmt(format_args!("{:?} Trampoline segment @ {:?}", inner.status, TRAMPOLINE_ADDR))
     }
 }
 
 impl Debug for UTrampolineSegment {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let inner = self.0.acquire();
-        f.write_fmt(format_args!("{:?} UTrampoline segment", inner.status))
+        f.write_fmt(format_args!("{:?} UTrampoline segment @ {:?}", inner.status, U_TRAMPOLINE_ADDR))
     }
 }
 
 impl Debug for TrapContextSegment {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let inner = self.0.acquire();
-        f.write_fmt(format_args!("{:?} TrapContext segment", inner.status))
+        f.write_fmt(format_args!("{:?} TrapContext segment @ {:?}", inner.status, TRAP_CONTEXT_ADDR))
     }
 }
 
 impl Debug for ProcKStackSegment {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let inner = self.0.acquire();
-        f.write_fmt(format_args!("{:?} ProcKStack segment", inner.status))
+        f.write_fmt(format_args!("{:?} ProcKStack segment @ {:?} ~ {:?}", inner.status, PROC_K_STACK_ADDR, PROC_K_STACK_ADDR + PROC_K_STACK_SIZE))
     }
 }
 
 impl Debug for ProcUStackSegment {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let inner = self.0.acquire();
-        f.write_fmt(format_args!("{:?} ProcUStack segment", inner.status))
+        f.write_fmt(format_args!("{:?} ProcUStack segment @ {:?} ~ {:?}", inner.status, PROC_U_STACK_ADDR, PROC_U_STACK_ADDR + PROC_U_STACK_SIZE))
     }
 }
 
@@ -299,6 +333,17 @@ impl Segment for IdenticalMappingSegment {
         let inner = self.0.acquire();
         Ok(Self::new(inner.range, inner.flag))
     }
+
+    fn do_lazy(&self, vpn: VirtPageNum, pagetable: &mut PageTable) -> Result<(), ErrorNum> {
+        let mut inner = self.0.acquire();
+        if inner.range.contains(vpn) {
+            let ppn = PhysPageNum(vpn.0);
+            pagetable.map(vpn, ppn, inner.flag.into());
+            Ok(())
+        } else {
+            Err(ErrorNum::EOOR)
+        }
+    }
 }
 
 impl Segment for ManagedSegment {
@@ -344,7 +389,8 @@ impl Segment for ManagedSegment {
         let mut inner = self.0.acquire();
         assert!(inner.status == SegmentStatus::Mapped);
         for vpn in inner.range {
-            inner.frames.remove(&vpn).unwrap();
+            // not dropping pageguards, for lazy cow.
+            // inner.frames.remove(&vpn).unwrap();
             pagetable.unmap(vpn);
         }
         inner.status = SegmentStatus::Zombie;
@@ -366,6 +412,26 @@ impl Segment for ManagedSegment {
     fn clone_seg(self: Arc<Self>) -> Result<ArcSegment, ErrorNum> {
         let inner = self.0.acquire();
         Ok(Self::new(inner.range, inner.flag, Some(self.clone()), inner.byte_len))
+    }
+
+    fn do_lazy(&self, vpn: VirtPageNum, pagetable: &mut PageTable) -> Result<(), ErrorNum> {
+        let mut inner = self.0.acquire();
+
+        if inner.range.contains(vpn) {
+            let pageguard = alloc_vm_page();
+            let ppn = pageguard.ppn;
+    
+            if let Some(source) = inner.clone_source.take() {
+                let source_ppn = source.0.acquire().frames.get(&vpn).unwrap().ppn;
+                unsafe {PhysPageNum::copy_page(&source_ppn, &ppn)}
+            }
+    
+            pagetable.map(vpn, ppn, inner.flag.into());
+            inner.frames.insert(vpn, pageguard);
+            Ok(())
+        } else {
+            Err(ErrorNum::EOOR)
+        }
     }
 }
 
@@ -438,6 +504,32 @@ impl Segment for VMASegment {
         let inner = self.0.acquire();
         Self::new_at(inner.start_vpn, inner.file.clone(), inner.flag, inner.file_offset, inner.length)
     }
+
+    fn do_lazy(&self, vpn: VirtPageNum, pagetable: &mut PageTable) -> Result<(), ErrorNum> {
+        let mut inner = self.0.acquire();
+
+        if inner.frames.contains_key(&vpn) {
+            let pg = inner.file.get_page((vpn - inner.start_vpn) * PAGE_SIZE + inner.file_offset)?;
+            pagetable.map(vpn, pg.ppn, inner.flag.into());
+            inner.frames.insert(vpn, pg);
+    
+            let mut vpn = inner.start_vpn;
+            let mut offset = 0;
+            let length = min(inner.file.stat()?.file_size, inner.length);
+            while offset < length {
+                let pg = inner.file.get_page(offset + inner.file_offset)?;
+                inner.frames.insert(vpn, pg.clone());
+                pagetable.map(vpn, pg.ppn, inner.flag.into());
+                offset += PAGE_SIZE;
+                vpn += 1;
+            }
+    
+            inner.status = SegmentStatus::Mapped;
+            Ok(())
+        } else {
+            Err(ErrorNum::EOOR)
+        }
+    }
 }
 
 impl Segment for TrampolineSegment {
@@ -494,6 +586,10 @@ impl Segment for TrampolineSegment {
     fn clone_seg(self: Arc<Self>) -> Result<ArcSegment, ErrorNum> {
         Ok(Self::new())
     }
+
+    fn do_lazy(&self, vpn: VirtPageNum, pagetable: &mut PageTable) -> Result<(), ErrorNum> {
+        panic!("TrampolineSegment no lazy");
+    }
 }
 
 impl Segment for UTrampolineSegment {
@@ -549,6 +645,10 @@ impl Segment for UTrampolineSegment {
 
     fn clone_seg(self: Arc<Self>) -> Result<ArcSegment, ErrorNum> {
         Ok(Self::new())
+    }
+
+    fn do_lazy(&self, vpn: VirtPageNum, pagetable: &mut PageTable) -> Result<(), ErrorNum> {
+        panic!("UTrampolineSegment no lazy");
     }
 }
 
@@ -609,6 +709,10 @@ impl Segment for TrapContextSegment {
 
     fn clone_seg(self: Arc<Self>) -> Result<ArcSegment, ErrorNum> {
         Ok(Self::new(Some(self.clone())))
+    }
+
+    fn do_lazy(&self, vpn: VirtPageNum, pagetable: &mut PageTable) -> Result<(), ErrorNum> {
+        panic!("TrapContextSegment no lazy");
     }
 }
 
@@ -679,6 +783,10 @@ impl Segment for ProcKStackSegment {
 
     fn clone_seg(self: Arc<Self>) -> Result<ArcSegment, ErrorNum> {
         Ok(Self::new())
+    }
+
+    fn do_lazy(&self, vpn: VirtPageNum, pagetable: &mut PageTable) -> Result<(), ErrorNum> {
+        panic!("ProcKStack no lazy");
     }
 }
 
@@ -755,6 +863,10 @@ impl Segment for ProcUStackSegment {
 
     fn clone_seg(self: Arc<Self>) -> Result<ArcSegment, ErrorNum> {
         Ok(Self::new(Some(self.clone())))
+    }
+
+    fn do_lazy(&self, vpn: VirtPageNum, pagetable: &mut PageTable) -> Result<(), ErrorNum> {
+        panic!("ProcUStack no lazy");
     }
 }
 

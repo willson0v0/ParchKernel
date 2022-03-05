@@ -5,6 +5,7 @@
 #![feature(panic_info_message)]
 #![feature(step_trait)]
 #![feature(is_some_with)]
+#![feature(drain_filter)]
 #![allow(dead_code)]
 #![deny(unused_must_use)]
 

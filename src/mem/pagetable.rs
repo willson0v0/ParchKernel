@@ -1,10 +1,11 @@
 use _core::mem::size_of;
 use alloc::vec::Vec;
 use bitflags::*;
+use riscv::register::satp;
 
 use core::fmt::{self, Debug, Formatter};
 
-use crate::{utils::LogLevel, config::PAGE_SIZE, process::ProcessID};
+use crate::{utils::{LogLevel, ErrorNum}, config::PAGE_SIZE, process::ProcessID};
 
 use super::{PageGuard, PhysAddr, alloc_vm_page, types::{PhysPageNum, VirtPageNum}};
 
@@ -134,6 +135,14 @@ impl PageTable {
         }
     }
 
+    pub fn from_satp() -> Self {
+        let root = satp::read().ppn();
+        Self {
+            root_ppn: PhysPageNum::from(root),
+            pages: Vec::new()
+        }
+    }
+
     fn print_ptes(&self, page_addr: PhysPageNum, idx: [usize; 3], indentation: usize, log_level: LogLevel) {
         for i in 0..(PAGE_SIZE / size_of::<PageTableEntry>()) {
             let pte_addr = PhysAddr::from(page_addr) + i * size_of::<PageTableEntry>();
@@ -244,6 +253,16 @@ impl PageTable {
             pt_ppn = pte_content.ppn();
         }
         unreachable!()
+    }
+
+    pub fn translate(&self, vpn: VirtPageNum) -> Result<PhysPageNum, ErrorNum> {
+        let pte_addr = self.walk_find(vpn).ok_or(ErrorNum::EADDRNOTAVAIL)?;
+        let pte_content: PageTableEntry = unsafe {pte_addr.read_volatile()};
+        if pte_content.valid() {
+            Ok(pte_content.ppn())
+        } else {
+            Err( ErrorNum::EADDRNOTAVAIL)
+        }
     }
 
     pub fn map(&mut self, vpn: VirtPageNum, ppn: PhysPageNum, flags: PTEFlags) {

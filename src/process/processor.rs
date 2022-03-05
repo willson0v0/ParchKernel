@@ -14,10 +14,10 @@ use crate::interrupt::{trap_return, fork_return};
 use crate::mem::{MemLayout};
 use crate::process::ProcessControlBlock;
 use crate::process::pcb::ProcessStatus;
-use crate::utils::{Mutex, MutexGuard};
+use crate::utils::{Mutex, MutexGuard, LogLevel};
 
 use super::pcb::PCBInner;
-use super::{dequeue, enqueue, INIT_PROCESS};
+use super::{dequeue, enqueue, INIT_PROCESS, free_current};
 
 global_asm!(include_str!("swtch.asm"));
 
@@ -187,6 +187,7 @@ impl Processor {
                 }
                 let proc_context = pcb_inner.get_context();
                 let mut idle_context = self.get_context();
+                // pcb_inner.mem_layout.pagetable.print(LogLevel::Verbose);
                 let proc_satp = pcb_inner.mem_layout.pagetable.satp(Some(proc.pid));
                 let scheuler_satp = self.inner.borrow().sche_mem_layout.as_ref().unwrap().pagetable.satp(None);
                 self.inner.borrow_mut().pcb = Some(proc.clone());
@@ -199,6 +200,7 @@ impl Processor {
                     satp::write(scheuler_satp);
                     asm!("sfence.vma");
                 }
+                // must switched back by to_scheduler, locked by suspend_switch or exit_switch
                 pcb_inner.check_intergrity();
             } else {
                 self.stall();
@@ -217,7 +219,6 @@ impl Processor {
         assert!(self.intr_state() == false, "Interrupt must be off to switch to scheduler.");
         // one int for one lock, another for ProcessorGuard
         // assert!(self.get_int_cnt() == 2, "Must only hold one lock when switching to scheduler.");
-        // assert!(get_processor().ref_cnt() == 2, "Must not hold processor guard.");
         let idle_context = self.get_context();
         let proc_context = proc_inner.get_context();
         unsafe {
@@ -256,21 +257,22 @@ impl Processor {
             let mut init_inner = INIT_PROCESS.get_inner();
             for child in &pcb_inner.children {
                 child.get_inner().parent = Some(Arc::downgrade(&INIT_PROCESS));
-                init_inner.children.insert(child.clone());
+                init_inner.children.push_back(child.clone());
             }
         }
         
         pcb_inner.children.clear();
-        // HACK: this is ugly as hell someone help me fix this pls
+        drop(pcb_inner);
+        // deduct proc's refcnt for it will not be dropped.
+        // Arc's final drop will not happen here, for parent of this process must held ref to this process, so it's safe to do so.
         unsafe {
-            // clone, strong count + 1 for this clone will not be dropped but consumed by Arc::into_raw (will be mem::forget()-ed)
-            let proc_raw = Arc::into_raw(proc.clone());
-            // dec proc.clone() count
-            Arc::decrement_strong_count(proc_raw);
-            // dec proc count for we are not able to drop it
-            Arc::decrement_strong_count(proc_raw);
+            verbose!("count b4 decrement: {}", Arc::strong_count(&proc));
+            let arc_ptr = Arc::into_raw(proc);
+            Arc::decrement_strong_count(arc_ptr);
+            let proc = Arc::from_raw(arc_ptr);
+            verbose!("count aft decrement: {}", Arc::strong_count(&proc));
+            self.to_scheduler(proc.get_inner());
         }
-        self.to_scheduler(pcb_inner);
         unreachable!()
     }
 

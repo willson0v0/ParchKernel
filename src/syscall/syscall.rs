@@ -1,6 +1,6 @@
 use core::mem::size_of;
 
-use alloc::{vec::Vec, sync::Arc, string::ToString};
+use alloc::{vec::Vec, sync::Arc, string::ToString, collections::LinkedList};
 
 use crate::{process::{FileDescriptor, get_processor, push_sum_on, pop_sum_on, enqueue, ProcessControlBlock, ProcessStatus, ProcessID, get_process, SignalNum, free_current}, mem::{VirtAddr, VMASegment, SegmentFlags, ManagedSegment, VPNRange}, utils::{ErrorNum, Mutex}, fs::{Path, open, OpenMode}, interrupt::trap_context::TrapContext};
 
@@ -94,11 +94,9 @@ pub fn sys_fork() -> Result<usize, ErrorNum> {
     let mut pcb_inner = proc.get_inner();
     let mut child_inner = child.get_inner();
     child_inner.parent = Some(Arc::downgrade(&proc));
-    pcb_inner.children.insert(child.clone());
+    pcb_inner.children.push_back(child.clone());
     let pid = child.pid.0;
-    let child_trap_ctx: &mut TrapContext = child_inner.trap_context();
-    *child_trap_ctx = TrapContext::current_ref().clone();
-    child_trap_ctx.a0 = 0;
+    child_inner.trap_context().a0 = 0;
     enqueue(child.clone());
     Ok(pid)
 }
@@ -107,6 +105,7 @@ pub fn sys_exec(elf_path: VirtAddr, argv: VirtAddr) -> Result<usize, ErrorNum> {
     let proc = get_processor().current().unwrap();
     let mut proc_inner = proc.get_inner();
     let path = elf_path.read_cstr()?.0;
+    debug!("proc {} exec {:?}", proc.pid, path);
     let path: Path = if path.starts_with('/') {
         path.into()
     } else {
@@ -129,16 +128,17 @@ pub fn sys_exec(elf_path: VirtAddr, argv: VirtAddr) -> Result<usize, ErrorNum> {
         }
         pop_sum_on();
     }
-    debug!("proc {} exec {:?}", proc.pid, path);
     let elf_file = open(&path, OpenMode::SYS)?.as_regular()?;
     proc_inner.exec(elf_file, args)?;
     Ok(0)
 }
 
 pub fn sys_exit(exit_code: isize) -> Result<usize, ErrorNum> {
-    info!("Application {} exited with code {:}", get_processor().current().unwrap().pid, exit_code);
+    let processor = get_processor();
+    info!("Application {} exited with code {:}", processor.current().unwrap().pid, exit_code);
+    // un-register it from process manager
     free_current();
-    get_processor().exit_switch(exit_code);
+    processor.exit_switch(exit_code);
     unreachable!("This part should be unreachable. Go check __switch.")
 }
 
@@ -207,20 +207,22 @@ pub fn sys_waitpid(pid: isize, exit_code: VirtAddr) -> Result<usize, ErrorNum> {
             return Err(ErrorNum::EINTR);
         }
 
-        let mut body_bag: Option<Arc<ProcessControlBlock>> = None;
-        for child in pcb_inner.children.clone().into_iter() {
-            if ((pid == -1) || (pid as usize == child.pid.0)) && child.get_inner().status == ProcessStatus::Zombie {
-                body_bag = Some(child);
-                break;
+        let mut zombies = pcb_inner.children.drain_filter(
+            |child| -> bool {
+                child.get_inner().status == ProcessStatus::Zombie
             }
-        }
+        ).collect::<LinkedList<_>>();
 
-        if let Some(corpse) = body_bag {
-            let corpse = pcb_inner.children.take(&corpse).unwrap();
+        if let Some(corpse) = zombies.pop_front() {
+            pcb_inner.children.append(&mut zombies);
             let corpse_inner = corpse.get_inner();
-            assert!(Arc::strong_count(&corpse) == 1, "Zombie {:?} was referenced by something else.", corpse.pid);
+            // make sure its data got released
+            // 1 here, 2 in scheduler context (maybe)
+            assert!(Arc::strong_count(&corpse) <= 2, "Zombie {:?} was referenced by something else, strong_count = {}", corpse.pid, Arc::strong_count(&corpse));
             info!("Zombie {:?} was killed.", corpse.pid);
+            push_sum_on();
             unsafe{exit_code.write_volatile(&corpse_inner.exit_code.unwrap());}
+            pop_sum_on();
             return Ok(corpse.pid.0);
         } else {
             drop(pcb_inner);

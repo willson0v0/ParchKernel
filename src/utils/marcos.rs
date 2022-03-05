@@ -2,29 +2,30 @@
 macro_rules! CALL_SYSCALL {
     ( $do_trace: expr, $syscall_name: expr ) => {
         {
-            let process = crate::process::get_processor().current().unwrap();
+            let pid = crate::process::get_processor().current().unwrap().pid;
+            // don't hold process because sys_exit might not return.
             if $do_trace {
-                info!("SYSCALL {} CALLED BY {:?}", stringify!($syscall_name), process.pid);
+                info!("SYSCALL {} CALLED BY {:?}", stringify!($syscall_name), pid);
             }
             let ret = $syscall_name();
             if $do_trace {
-                info!("SYSCALL {} CALLED BY {:?} RESULT {:?}", stringify!($syscall_name), process.pid, ret);
+                info!("SYSCALL {} CALLED BY {:?} RESULT {:?}", stringify!($syscall_name), pid, ret);
             }
             ret
         }
     };
     ( $do_trace: expr, $syscall_name: expr, $($y:expr),+ ) => {
         {
-            let process = crate::process::get_processor().current().unwrap();
+            let pid = crate::process::get_processor().current().unwrap().pid;
             if $do_trace {
-                info!("SYSCALL {} CALLED BY {:?}", stringify!($syscall_name), process.pid);
+                info!("SYSCALL {} CALLED BY {:?}", stringify!($syscall_name), pid);
                 $(
                     debug!("{:>25} = {:?}", stringify!{$y}, $y);
                 )+
             }
             let ret = $syscall_name($($y),+);
             if $do_trace {
-                info!("SYSCALL {} CALLED BY {:?} RESULT {:?}", stringify!($syscall_name), process.pid, ret);
+                info!("SYSCALL {} CALLED BY {:?} RESULT {:?}", stringify!($syscall_name), pid, ret);
             }
             ret
         }

@@ -134,7 +134,6 @@ impl PageAllocator for BitMapPageAllocator {
 			unsafe{to_free.clear_content();}
 		}
         self.mark_available(to_free, is_exec);
-		verbose!("Freed: {:?}", to_free)
     }
 
     fn claim(&mut self, to_claim: PhysPageNum, is_exec: bool) {

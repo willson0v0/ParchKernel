@@ -27,7 +27,7 @@ pub const PROC_U_STACK_ADDR : VirtAddr = VirtAddr(PROC_K_STACK_ADDR.0 - PAGE_SIZ
 pub const MAX_CPUS			: usize = 16;	
 pub const CLOCK_FREQ		: usize = 0x00989680;   // from dtb
 pub const CYCLE_PER_TICK    : usize = 0x100;
-pub const TIMER_FRAC		: usize = 10;	// trigger every 100ms
+pub const TIMER_FRAC		: usize = 1;	// trigger every 100ms
 
 pub const INIT_PROCESS_PATH      : &str = "/init_proc";
 
