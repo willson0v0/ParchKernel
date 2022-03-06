@@ -253,6 +253,7 @@ impl Processor {
         pcb_inner.exit_code = Some(exit_code);
 
         // let init proc to take all child process
+        // TODO: potential dead lock caused by proc lock order.
         {
             let mut init_inner = INIT_PROCESS.get_inner();
             for child in &pcb_inner.children {

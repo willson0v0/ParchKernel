@@ -293,7 +293,7 @@ impl PFSBase {
         }
     }
 
-    pub fn read(&self, length: usize, offset: Cursor) -> Result<alloc::vec::Vec<u8>, crate::utils::ErrorNum> {
+    pub fn read(&self, mut length: usize, offset: Cursor) -> Result<alloc::vec::Vec<u8>, crate::utils::ErrorNum> {
         let mut offset = offset.0;
         let fs = self.fs.upgrade().unwrap();
         let mut fs_inner = fs.inner.acquire();
@@ -301,7 +301,17 @@ impl PFSBase {
         let mut inode = inode_guard.acquire();
         inode.access_time = get_real_time_epoch();
 
+        // truncate
+        if inode.f_size <= offset + length {
+            if offset > inode.f_size {
+                length = 0;
+            } else {
+                length = inode.f_size - offset;
+            }
+        }
+
         if length == 0 {return Ok(Vec::new())}
+        
         if let Some(mmap_start) = self.mmap_start {
             unsafe {
                 Ok((VirtAddr::from(mmap_start) + offset).read_data(length))
@@ -313,11 +323,12 @@ impl PFSBase {
             while offset < target {
                 let blk = self.get_blockno_locked(offset, false, &mut fs_inner, &mut inode)?;
                 let pa = ParchFS::blockno_2_pa(blk);
+
                 let cpy_start = offset % BLK_SIZE;
                 let cpy_end = if target > offset + (BLK_SIZE - cpy_start) {
                     BLK_SIZE
                 } else {
-                    target - offset
+                    target % BLK_SIZE
                 };
                 let cpy_size = cpy_end - cpy_start;
                 result.append(&mut unsafe{(pa + cpy_start).read_data(cpy_size).clone()});

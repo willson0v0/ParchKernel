@@ -25,13 +25,20 @@ impl Debug for UartPTS {
 
 impl File for UartPTS {
     fn write(&self, data: alloc::vec::Vec::<u8>) -> Result<usize, crate::utils::ErrorNum> {
-        UART0.write_bytes(&data);
-        Ok(data.len())
+        if self.mode.contains(OpenMode::WRITE) {
+            UART0.write_bytes(&data);
+            Ok(data.len())
+        } else {
+            Err(ErrorNum::EPERM)
+        }
     }
 
     fn read(&self, length: usize) -> Result<alloc::vec::Vec<u8>, crate::utils::ErrorNum> {
-        // FIXME: change to read_bytes, fix UART0.sync() and plic interrupt.
-        Ok(UART0.read_bytes(length))
+        if self.mode.contains(OpenMode::READ) {
+            Ok(UART0.read_bytes(length))
+        } else {
+            Err(ErrorNum::EPERM)
+        }
     }
 
     fn as_socket<'a>(self: alloc::sync::Arc<Self>) -> Result<alloc::sync::Arc<dyn crate::fs::SocketFile   + 'a>, crate::utils::ErrorNum> where Self: 'a {

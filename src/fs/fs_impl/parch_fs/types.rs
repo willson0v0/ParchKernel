@@ -217,7 +217,7 @@ impl File for PFSRegular {
     fn read(&self, length: usize) -> Result<alloc::vec::Vec<u8>, crate::utils::ErrorNum> {
         let mut inner = self.0.acquire();
         let res = inner.base.read(length, inner.cursor)?;
-        inner.cursor.0 += length;
+        inner.cursor.0 += res.len();
         Ok(res)
     }
 

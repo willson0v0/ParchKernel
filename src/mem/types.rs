@@ -169,6 +169,7 @@ impl VirtAddr {
 
     // TODO: check mapping exists
     pub unsafe fn write_data(&self, data: Vec<u8>) {
+        if data.len() == 0 {return;}
         copy_nonoverlapping(data.as_ptr(), self.0 as * mut u8, data.len());
     }
 

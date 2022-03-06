@@ -153,6 +153,7 @@ pub fn user_trap() -> ! {
                 if let Ok(ret_val) = res {
                     trap_context.a0 = ret_val;
                 } else {
+                    warning!("Syscall {} failed with {:?}", syscall_id, res);
                     trap_context.a0 = res.unwrap_err().to_ret();
                 }
             },

@@ -1,7 +1,7 @@
 use crate::{fs::{VirtualFileSystem, Path, File, DirFile, types::{FileStat, Permission}, OpenMode, Dirent, open}, utils::ErrorNum};
 use core::fmt::Debug;
 
-use alloc::{sync::Arc, borrow::ToOwned, string::ToString};
+use alloc::{sync::Arc, string::ToString};
 use lazy_static::*;
 
 use super::UartPTS;
@@ -72,11 +72,11 @@ impl Debug for DevFolder {
 }
 
 impl File for DevFolder {
-    fn write(&self, data: alloc::vec::Vec::<u8>) -> Result<usize, crate::utils::ErrorNum> {
+    fn write(&self, _data: alloc::vec::Vec::<u8>) -> Result<usize, crate::utils::ErrorNum> {
         Err(ErrorNum::EISDIR)
     }
 
-    fn read(&self, length: usize) -> Result<alloc::vec::Vec<u8>, ErrorNum> {
+    fn read(&self, _length: usize) -> Result<alloc::vec::Vec<u8>, ErrorNum> {
         Err(ErrorNum::EISDIR)
     }
 
@@ -142,11 +142,11 @@ impl DirFile for DevFolder {
         }
     }
 
-    fn make_file(&self, name: alloc::string::String, perm: crate::fs::types::Permission, f_type: crate::fs::types::FileType) -> Result<Arc<dyn File>, ErrorNum> {
+    fn make_file(&self, _name: alloc::string::String, _perm: crate::fs::types::Permission, _f_type: crate::fs::types::FileType) -> Result<Arc<dyn File>, ErrorNum> {
         Err(ErrorNum::EPERM)
     }
 
-    fn remove_file(&self, name: alloc::string::String) -> Result<(), ErrorNum> {
+    fn remove_file(&self, _name: alloc::string::String) -> Result<(), ErrorNum> {
         Err(ErrorNum::EPERM)
     }
 

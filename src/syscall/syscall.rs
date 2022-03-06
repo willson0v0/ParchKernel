@@ -1,4 +1,4 @@
-use core::{mem::size_of, fmt::Debug};
+use core::{mem::size_of};
 
 use alloc::{vec::Vec, sync::Arc, collections::LinkedList, borrow::ToOwned, string::String};
 
@@ -45,6 +45,7 @@ pub fn sys_read(fd: FileDescriptor, buf: VirtAddr, length: usize) -> Result<usiz
     let file = get_processor().current().unwrap().get_inner().get_file(fd)?.clone();
     // TODO: register MMAP if needed
     let res = file.read(length)?;
+    let length = res.len();
     push_sum_on();
     unsafe {buf.write_data(res)};
     pop_sum_on();
@@ -114,10 +115,35 @@ pub fn sys_exec(elf_path: VirtAddr, argv: VirtAddr) -> Result<usize, ErrorNum> {
         proc_inner.cwd.concat(&path.into())
     };
     let mut args: Vec<Vec<u8>> = Vec::new();
+
+    let mut exec_path = path.clone();
+    // check if it's shabang
+    let file = open(&path, OpenMode::READ | OpenMode::EXEC)?;
+    let shebang = file.read(2)?;
+    if shebang[0] == b'#' && shebang[1] == b'!' {
+        info!("shabang discoverd.");
+        
+        let mut shebang_exec: Vec<u8> = Vec::new();
+        loop {
+            let byte = file.read(1)?[0];
+            if byte == b' ' {
+                continue;
+            } else if byte != b'\r' && byte != b'\n' {
+                shebang_exec.push(byte);
+            } else {
+                break;
+            }
+        }
+        let shebang_exec_str = String::from_utf8(shebang_exec.clone()).map_err(|_| ErrorNum::ENOENT)?;
+        exec_path = shebang_exec_str.into();
+        
+        shebang_exec.push(0);
+        args.push(shebang_exec);
+    }
+
     let mut name_bytes = format!("{:?}", path).into_bytes();
     name_bytes.push(b'\0');
     args.push(name_bytes);
-    debug!("argv {} : {:?}", args.len(), String::from_utf8(args.last().unwrap().clone()));
     let mut p = argv;
     if p.0 != 0 {
         let _intr_guard = get_processor();
@@ -130,12 +156,16 @@ pub fn sys_exec(elf_path: VirtAddr, argv: VirtAddr) -> Result<usize, ErrorNum> {
             let mut bytes = argv_str.read_cstr_raw(1023);
             bytes.push(0);
             args.push(bytes);
-            debug!("argv {} : {:?}", args.len(), String::from_utf8(args.last().unwrap().clone()));
             p += size_of::<VirtAddr>();
         }
         pop_sum_on();
     }
-    let elf_file = open(&path, OpenMode::SYS)?.as_regular()?;
+
+    for (idx, s) in args.iter().enumerate() {
+        debug!("argv {} : {:?}", idx, String::from_utf8(s.clone()));
+    }
+
+    let elf_file = open(&exec_path, OpenMode::SYS)?.as_regular()?;
     let arg_count = args.len();
     proc_inner.exec(elf_file, args)?;
     Ok(arg_count)

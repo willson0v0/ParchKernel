@@ -103,10 +103,10 @@ impl Drop for ProcessControlBlock {
 
 impl PCBInner {
     pub fn default_fds() -> Result<BTreeMap<FileDescriptor, Arc<dyn File>>, ErrorNum> {
-        let mut files: BTreeMap<FileDescriptor, Arc<dyn File>> = BTreeMap::new();
-        files.insert(0.into(), open(&Path::new("/dev/pts")?, OpenMode::READ )?);
-        files.insert(1.into(), open(&Path::new("/dev/pts")?, OpenMode::WRITE)?);
-        files.insert(2.into(), open(&Path::new("/dev/pts")?, OpenMode::WRITE)?);
+        let files: BTreeMap<FileDescriptor, Arc<dyn File>> = BTreeMap::new();
+        // files.insert(0.into(), open(&Path::new("/dev/pts")?, OpenMode::READ )?);
+        // files.insert(1.into(), open(&Path::new("/dev/pts")?, OpenMode::WRITE)?);
+        // files.insert(2.into(), open(&Path::new("/dev/pts")?, OpenMode::WRITE)?);
         Ok(files)
     }
 
@@ -302,7 +302,8 @@ impl PCBInner {
         self.elf_file = elf_file.clone();
         self.entry_point = entry;
         self.data_end = data;
-        self.files = Self::default_fds()?;
+        // preserve file descriptor table
+        // self.files = Self::default_fds()?;
         self.trace_enabled = Self::default_trace();
         self.signal_contexts.clear();
         self.signal_handler = Self::default_hander();
