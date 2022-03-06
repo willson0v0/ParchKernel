@@ -15,3 +15,4 @@ pub const SYSCALL_SIGRETURN : usize =  13;
 pub const SYSCALL_GETCWD    : usize =  14;
 pub const SYSCALL_CHDIR     : usize =  15;
 pub const SYSCALL_SBRK      : usize =  16;
+pub const SYSCALL_GETDENTS  : usize =  17;

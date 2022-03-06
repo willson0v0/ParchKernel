@@ -82,49 +82,63 @@ macro_rules! enum_with_tryfrom_u16 {
 #[macro_export]
 macro_rules! verbose {
     ($($arg:tt)*) => {
-        $crate::utils::log($crate::utils::LogLevel::Verbose, format_args!($($arg)*))
+        if cfg!(feature = "log_verbose") {
+            $crate::utils::log($crate::utils::LogLevel::Verbose, format_args!($($arg)*))
+        }
     }
 }
 
 #[macro_export]
 macro_rules! debug {
     ($($arg:tt)*) => {
-        $crate::utils::log($crate::utils::LogLevel::Debug, format_args!($($arg)*))
+        if cfg!(feature = "log_debug") {
+            $crate::utils::log($crate::utils::LogLevel::Debug, format_args!($($arg)*))
+        }
     }
 }
 
 #[macro_export]
 macro_rules! info {
     ($($arg:tt)*) => {
-        $crate::utils::log($crate::utils::LogLevel::Info, format_args!($($arg)*))
+        if cfg!(feature = "log_info") {
+            $crate::utils::log($crate::utils::LogLevel::Info, format_args!($($arg)*))
+        }
     }
 }
 
 #[macro_export]
 macro_rules! warning {
     ($($arg:tt)*) => {
-        $crate::utils::log($crate::utils::LogLevel::Warning, format_args!($($arg)*))
+        if cfg!(feature = "log_warning") {
+            $crate::utils::log($crate::utils::LogLevel::Warning, format_args!($($arg)*))
+        }
     }
 }
 
 #[macro_export]
 macro_rules! error {
     ($($arg:tt)*) => {
-        $crate::utils::log($crate::utils::LogLevel::Error, format_args!($($arg)*))
+        if cfg!(feature = "log_error") {
+            $crate::utils::log($crate::utils::LogLevel::Error, format_args!($($arg)*))
+        }
     }
 }
 
 #[macro_export]
 macro_rules! milestone {
     ($($arg:tt)*) => {
-        $crate::utils::log($crate::utils::LogLevel::Milestone, format_args!($($arg)*))
+        if cfg!(feature = "log_milestone") {
+            $crate::utils::log($crate::utils::LogLevel::Milestone, format_args!($($arg)*))
+        }
     }
 }
 
 #[macro_export]
 macro_rules! fatal {
     ($($arg:tt)*) => {
-        $crate::utils::log($crate::utils::LogLevel::Fatal, format_args!($($arg)*))
+        if cfg!(feature = "log_fatal") {
+            $crate::utils::log($crate::utils::LogLevel::Fatal, format_args!($($arg)*))
+        }
     }
 }
 

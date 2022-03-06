@@ -28,6 +28,9 @@ impl MountManagerInner {
     }
 
     pub fn mount(&mut self, path: Path, vfs: Arc<dyn VirtualFileSystem>) -> Result<(), ErrorNum> {
+        if !path.is_root() {
+            self.open(&path, OpenMode::SYS)?;   // must have mount point directory, unless is root.
+        }
         if self.fs.contains_key(&path) {
             Err(ErrorNum::EADDRINUSE)
         } else {

@@ -267,24 +267,27 @@ impl PFSBase {
             unsafe{start_va.write_data(data)};
             Ok(())
         } else {
-            let fs = self.fs.upgrade().unwrap();
-            let mut fs_inner = fs.inner.acquire();
-            let inode_guard = fs_inner.get_inode(self.inode_no)?;
-            let mut inode = inode_guard.acquire();
             let length = data.len();
             let target = length + offset;
+            let mut data_ptr = 0;
             while offset < target {
                 let blk = self.get_blockno_locked(offset, false, &mut fs_inner, &mut inode)?;
                 let pa = ParchFS::blockno_2_pa(blk);
-                let cpy_start = offset % BLK_SIZE;
-                let cpy_end = if target > offset + (BLK_SIZE - cpy_start) {
+                // offset to pa
+                let dst_start = offset % BLK_SIZE;
+                let dst_end = if target > offset + (BLK_SIZE - dst_start) {
                     BLK_SIZE
                 } else {
-                    target - offset
+                    target % BLK_SIZE
                 };
-                let cpy_size = cpy_end - cpy_start;
-                unsafe{&(pa + cpy_start).write_data(data[(offset+cpy_start)..(offset+cpy_end)].to_vec())};
+                let cpy_size = dst_end - dst_start;
+
+                let src_start = data_ptr;
+                let src_end = src_start + cpy_size;
+
+                unsafe{&(pa + dst_start).write_data(data[src_start..src_end].to_vec())};
                 offset += cpy_size;
+                data_ptr += cpy_size;
             }
             Ok(())
         }

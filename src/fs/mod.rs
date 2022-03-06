@@ -17,6 +17,7 @@ pub use types::{
     CharFile    ,
     FIFOFile    ,
     Cursor,
+    Dirent
 };
 
 pub use vfs::{
@@ -39,6 +40,7 @@ pub fn open(path: &Path, mode: OpenMode) -> Result<alloc::sync::Arc<dyn File>, c
 
 pub fn init() {
     let mut inner = MOUNT_MANAGER.inner.acquire();
-    inner.mount("/".into(), fs_impl::PARCH_FS.clone()).expect("Failed to mount root fs");
-    inner.mount("/dev".into(), fs_impl::DEV_FS.clone()).expect("Failed to mount dev fs");
+    inner.mount("/".into(), fs_impl::PARCH_FS.clone()).expect("Failed to mount root fs.");
+    inner.mkdir(&"/dev".into()).expect("Failed to create dev fs mount point.");
+    inner.mount("/dev".into(), fs_impl::DEV_FS.clone()).expect("Failed to mount dev fs.");
 }

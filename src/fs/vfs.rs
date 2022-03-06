@@ -49,6 +49,7 @@ pub trait VirtualFileSystem : Send + Sync + Debug {
     fn link(&self, dest: Arc<dyn File>, link_file: &Path) -> Result<Arc<dyn File>, ErrorNum>;
     fn sym_link(&self, abs_src: &Path, rel_dst: &Path) -> Result<Arc<dyn LinkFile>, ErrorNum>;
     fn mount_path(&self) -> Path;
+    fn as_vfs<'a>(self: Arc<Self>) -> Arc<dyn VirtualFileSystem + 'a> where Self: 'a;
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]

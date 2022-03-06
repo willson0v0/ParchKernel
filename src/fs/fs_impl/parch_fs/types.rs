@@ -462,7 +462,7 @@ impl DirFile for PFSDir {
     }
 
     fn make_file(&self, name: String, perm: Permission, f_type: FileType) -> Result<Arc<dyn File>, ErrorNum>{
-        if f_type != FileType::REGULAR || f_type != FileType::DIR {
+        if f_type != FileType::REGULAR && f_type != FileType::DIR {
             return Err(ErrorNum::EBADTYPE);
         }
         if name.bytes().len() > DENTRY_NAME_LEN {
@@ -500,6 +500,11 @@ impl DirFile for PFSDir {
         let mut f_name: [u8; DENTRY_NAME_LEN] = [0; DENTRY_NAME_LEN];
         f_name[0..bytes.len()].clone_from_slice(&bytes[..]) ;
 
+        drop(inode);
+        drop(inode_guard);
+        drop(fs_inner);
+        drop(fs);
+
         inner.add_dirent(PFSDEntry {
             inode: inode_no,
             permission: perm.into(),
@@ -507,6 +512,8 @@ impl DirFile for PFSDir {
             name_len: bytes.len() as u16,
             f_name,
         })?;
+        
+        drop(inner);
 
         self.open_dir(&name.into(), OpenMode::SYS)
     }

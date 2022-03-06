@@ -28,6 +28,7 @@ impl Debug for ParchFS {
 
 impl ParchFS {
     pub fn new(mount_path: Path) -> Self {
+        // TODO: if not mounted at root, set /.. to upper level fs's folder.
         Self{
             inner: SpinMutex::new("PFS lock", ParchFSInner::new()),
             mount_path,
@@ -183,9 +184,20 @@ impl VirtualFileSystem for ParchFS {
         if mode.contains(OpenMode::CREATE) {
             self.mkfile(path)?;
         }
+        if path.is_root() {
+            return Ok(Arc::new(
+                PFSDir(SpinMutex::new("PFS File lock", crate::fs::fs_impl::parch_fs::PFSDirInner { base: PFSBase {
+                    inode_no: self.inner.acquire().superblock.root_inode.into(),
+                    open_mode: mode,
+                    mmap_start: None,
+                    fs: Arc::downgrade(&PARCH_FS),
+                    path: Path::root(),
+                } })))
+            );
+        }
         // Note: cannot use open "/" or root_dir() here
         let root_dir = Arc::new(
-            PFSDir(SpinMutex::new("PFS ROOT", crate::fs::fs_impl::parch_fs::PFSDirInner { base: PFSBase {
+            PFSDir(SpinMutex::new("PFS File lock", crate::fs::fs_impl::parch_fs::PFSDirInner { base: PFSBase {
                 inode_no: self.inner.acquire().superblock.root_inode.into(),
                 open_mode: OpenMode::SYS,
                 mmap_start: None,
@@ -193,11 +205,7 @@ impl VirtualFileSystem for ParchFS {
                 path: Path::root(),
             } }))
         );
-        if path.is_root() {
-            Ok(root_dir.clone())
-        } else {
-            root_dir.open_dir(path, mode)
-        }
+        root_dir.open_dir(path, mode)
     }
 
     fn mkdir(&self, path: &crate::fs::Path) -> Result<(), crate::utils::ErrorNum> {
@@ -228,6 +236,10 @@ impl VirtualFileSystem for ParchFS {
     }
 
     fn mount_path(&self) -> Path {
-        todo!()
+        self.mount_path.clone()
+    }
+
+    fn as_vfs<'a>(self: Arc<Self>) -> Arc<dyn VirtualFileSystem + 'a> where Self: 'a {
+        self
     }
 }

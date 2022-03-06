@@ -116,13 +116,13 @@ static LOG_BG_COLOURS: &'static [u8] = &[
 ];
 
 static LOG_TITLE: &'static [&str] = &[
-    "VERBOSE    ",
-    "DEBUG      ",
-    "INFO       ",
-    "WARNING    ",
-    "ERROR      ",
-    "MILESTONE  ",
-    "FATAL      ",
+    "VERBOSE",
+    "DEBUG",
+    "INFO",
+    "WARNING",
+    "ERROR",
+    "MILESTONE",
+    "FATAL",
 ];
 
 pub fn do_log(log_level: LogLevel, args: fmt::Arguments) {
@@ -132,17 +132,17 @@ pub fn do_log(log_level: LogLevel, args: fmt::Arguments) {
     // print_no_lock(args);
     // print_no_lock!("\x1b[{};{}m\r\n", FG_DEFAULT, BG_DEFAULT)
     print_no_lock!(
-        "\x1b[{};{}m[ {:>8.5} ] {} h {} p {} : ", 
+        "\x1b[{};{}m[ {:>8.5} ] h {} p {} {:<10}: ", 
         LOG_FG_COLOURS[log_level.to_num()], 
         LOG_BG_COLOURS[log_level.to_num()], 
         get_time_second(),
-        LOG_TITLE[log_level.to_num()],
         get_hart_id(),
         if let Some(proc) = get_processor().current() {
             proc.pid.0
         } else {
             0
-        }
+        },
+        LOG_TITLE[log_level.to_num()],
     );
     print_no_lock(args);
     print_no_lock!("\x1b[{};{}m\r\n", FG_DEFAULT, BG_DEFAULT)
