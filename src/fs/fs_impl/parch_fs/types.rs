@@ -1,5 +1,5 @@
 use crate::{mem::{PhysAddr, VMASegment}, utils::{SpinMutex, Mutex, ErrorNum, time::get_real_time_epoch}, fs::{RegularFile, File, BlockFile, DirFile, OpenMode, types::{FileType, Permission, Dirent}, Cursor}, config::PAGE_SIZE};
-use super::{DIRECT_BLK_COUNT, INODE_SIZE, DENTRY_NAME_LEN, DENTRY_SIZE, fs::{ParchFS}, PFSBase, BAD_BLOCK, BAD_INODE, BLK_SIZE};
+use super::{DIRECT_BLK_COUNT, INODE_SIZE, DENTRY_NAME_LEN, DENTRY_SIZE, fs::{ParchFS}, PFSBase, BAD_BLOCK, BAD_INODE};
 
 use core::mem::size_of;
 use core::slice::from_raw_parts;
@@ -57,31 +57,34 @@ impl BlockNo {
 }
 
 bitflags! {
+    #[repr(C)]
     pub struct PFSPerm: u16 {
-        const OWNER_R = 0400;
-        const OWNER_W = 0200;
-        const OWNER_X = 0100;
-        const GROUP_R = 0040;
-        const GROUP_W = 0020;
-        const GROUP_X = 0010;
-        const OTHER_R = 0004;
-        const OTHER_W = 0002;
-        const OTHER_X = 0001;
+        const OWNER_R = 0o400;
+        const OWNER_W = 0o200;
+        const OWNER_X = 0o100;
+        const GROUP_R = 0o040;
+        const GROUP_W = 0o020;
+        const GROUP_X = 0o010;
+        const OTHER_R = 0o004;
+        const OTHER_W = 0o002;
+        const OTHER_X = 0o001;
     }
 }
 
-bitflags! {
-    pub struct PFSType: u16 {
-        const SOCKET  = 0001;
-        const LINK    = 0002;
-        const REGULAR = 0004;
-        const BLOCK   = 0010;
-        const DIR     = 0020;
-        const CHAR    = 0040;
-        const FIFO    = 0100;
-        const UNKNOWN = 0200;
+enum_with_tryfrom_u16!(
+    #[repr(u16)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum PFSType {
+        SOCKET  = 0o001,
+        LINK    = 0o002,
+        REGULAR = 0o004,
+        BLOCK   = 0o010,
+        DIR     = 0o020,
+        CHAR    = 0o040,
+        FIFO    = 0o100,
+        UNKNOWN = 0o200,
     }
-}
+);
 
 impl Into<Permission> for PFSPerm {
     fn into(self) -> Permission {
@@ -91,7 +94,7 @@ impl Into<Permission> for PFSPerm {
 
 impl Into<FileType> for PFSType {
     fn into(self) -> FileType {
-        FileType::from_bits(self.bits()).unwrap()
+        FileType::try_from(self as u16).expect(format!("unknown file type {}", self as u16).as_str())
     }
 }
 
@@ -103,7 +106,7 @@ impl From<Permission> for PFSPerm {
 
 impl From<FileType> for PFSType {
     fn from(source: FileType) -> Self {
-        Self::from_bits(source.bits()).unwrap()
+        Self::try_from(source as u16).expect(format!("unknown file type {}", source as u16).as_str())
     }
 }
 
@@ -358,11 +361,11 @@ impl PFSDirInner {
 }
 
 impl File for PFSDir {
-    fn write(&self, data: alloc::vec::Vec::<u8>) -> Result<usize, crate::utils::ErrorNum> {
+    fn write(&self, _data: alloc::vec::Vec::<u8>) -> Result<usize, crate::utils::ErrorNum> {
         Err(ErrorNum::EISDIR)
     }
 
-    fn read(&self, length: usize) -> Result<alloc::vec::Vec<u8>, ErrorNum> {
+    fn read(&self, _length: usize) -> Result<alloc::vec::Vec<u8>, ErrorNum> {
         Err(ErrorNum::EISDIR)
     }
 
@@ -412,6 +415,7 @@ impl DirFile for PFSDir {
         let entries = self.read_dirent()?;
         let inner = self.0.acquire();
         for e in &entries {
+            // verbose!("Opendir looking for {}, f_type {:?}, target {}", e.f_name, e.f_type, rel_path.components[0]);
             if e.f_name == rel_path.components[0] {
                 let base = PFSBase::new(
                     e.inode.into(), 

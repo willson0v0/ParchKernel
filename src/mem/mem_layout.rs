@@ -1,9 +1,9 @@
 use core::{arch::asm};
 
-use alloc::{vec::Vec, sync::Arc, borrow::ToOwned, string::String, collections::BTreeMap};
+use alloc::{vec::Vec, sync::Arc, borrow::ToOwned, string::String};
 use riscv::register::{satp};
-use crate::{utils::{SpinMutex, ErrorNum}, config::{PHYS_END_ADDR, MMIO_RANGES, PAGE_SIZE, PROC_K_STACK_ADDR, TRAMPOLINE_ADDR, U_TRAMPOLINE_ADDR, TRAP_CONTEXT_ADDR, PROC_U_STACK_ADDR}, mem::{TrampolineSegment, UTrampolineSegment, TrapContextSegment, IdenticalMappingSegment, segment::SegmentFlags, VirtAddr, types::VPNRange, ManagedSegment, stat_mem}, fs::RegularFile, process::{get_processor, get_hart_id}};
-use super::{PageTable, Segment, VirtPageNum, ProcKStackSegment, segment::ProcUStackSegment, ArcSegment};
+use crate::{utils::{ErrorNum}, config::{PHYS_END_ADDR, MMIO_RANGES, PAGE_SIZE, PROC_K_STACK_ADDR, TRAMPOLINE_ADDR, U_TRAMPOLINE_ADDR, TRAP_CONTEXT_ADDR, PROC_U_STACK_ADDR}, mem::{TrampolineSegment, UTrampolineSegment, TrapContextSegment, IdenticalMappingSegment, segment::SegmentFlags, VirtAddr, types::VPNRange, ManagedSegment, stat_mem}, fs::RegularFile, process::{get_processor, get_hart_id}};
+use super::{PageTable, VirtPageNum, ProcKStackSegment, segment::ProcUStackSegment, ArcSegment};
 
 use crate::utils::elf_rs_wrapper::read_elf;
 use elf_rs::*;
@@ -43,61 +43,61 @@ impl MemLayout {
         // trap_context
         verbose!("Registering TrapContext...");
         layout.register_segment(TrapContextSegment::new(None));
-        // text
-        verbose!("Registering Kernel text...");
-        layout.register_segment(
-            IdenticalMappingSegment::new(
-                VPNRange::new(
-                    VirtAddr::from(stext as usize).into(), 
-                    VirtAddr::from(etext as usize).to_vpn_ceil()
-                ),
-                SegmentFlags::R | SegmentFlags::X
-            )
-        );
-        // rodata
-        verbose!("Registering Kernel rodata...");
-        layout.register_segment(
-            IdenticalMappingSegment::new(
-                VPNRange::new(
-                    VirtAddr::from(srodata as usize).into(), 
-                    VirtAddr::from(erodata as usize).to_vpn_ceil()
-                ),
-                SegmentFlags::R
-            )
-        );
-        // data
-        verbose!("Registering Kernel data...");
-        layout.register_segment(
-            IdenticalMappingSegment::new(
-                VPNRange::new(
-                    VirtAddr::from(sdata as usize).into(), 
-                    VirtAddr::from(edata as usize).to_vpn_ceil()
-                ),
-                SegmentFlags::R
-            )
-        );
-        // bss
-        verbose!("Registering Kernel bss...");
-        layout.register_segment(
-            IdenticalMappingSegment::new(
-                VPNRange::new(
-                    VirtAddr::from(sbss_with_stack as usize).into(), 
-                    VirtAddr::from(ebss as usize).to_vpn_ceil()
-                ),
-                SegmentFlags::R | SegmentFlags::W
-            )
-        );
-        // Physical memories
-        verbose!("Registering Physical memory...");
-        layout.register_segment(
-            IdenticalMappingSegment::new(
-                VPNRange::new(
-                    VirtAddr::from(ekernel as usize).into(), 
-                    VirtAddr::from(PHYS_END_ADDR.0).to_vpn_ceil()
-                ),
-                SegmentFlags::R | SegmentFlags::W
-            )
-        );
+        // // text
+        // verbose!("Registering Kernel text...");
+        // layout.register_segment(
+        //     IdenticalMappingSegment::new(
+        //         VPNRange::new(
+        //             VirtAddr::from(stext as usize).into(), 
+        //             VirtAddr::from(etext as usize).to_vpn_ceil()
+        //         ),
+        //         SegmentFlags::R | SegmentFlags::X
+        //     )
+        // );
+        // // rodata
+        // verbose!("Registering Kernel rodata...");
+        // layout.register_segment(
+        //     IdenticalMappingSegment::new(
+        //         VPNRange::new(
+        //             VirtAddr::from(srodata as usize).into(), 
+        //             VirtAddr::from(erodata as usize).to_vpn_ceil()
+        //         ),
+        //         SegmentFlags::R
+        //     )
+        // );
+        // // data
+        // verbose!("Registering Kernel data...");
+        // layout.register_segment(
+        //     IdenticalMappingSegment::new(
+        //         VPNRange::new(
+        //             VirtAddr::from(sdata as usize).into(), 
+        //             VirtAddr::from(edata as usize).to_vpn_ceil()
+        //         ),
+        //         SegmentFlags::R
+        //     )
+        // );
+        // // bss
+        // verbose!("Registering Kernel bss...");
+        // layout.register_segment(
+        //     IdenticalMappingSegment::new(
+        //         VPNRange::new(
+        //             VirtAddr::from(sbss_with_stack as usize).into(), 
+        //             VirtAddr::from(ebss as usize).to_vpn_ceil()
+        //         ),
+        //         SegmentFlags::R | SegmentFlags::W
+        //     )
+        // );
+        // // Physical memories
+        // verbose!("Registering Physical memory...");
+        // layout.register_segment(
+        //     IdenticalMappingSegment::new(
+        //         VPNRange::new(
+        //             VirtAddr::from(ekernel as usize).into(), 
+        //             VirtAddr::from(PHYS_END_ADDR.0).to_vpn_ceil()
+        //         ),
+        //         SegmentFlags::R | SegmentFlags::W
+        //     )
+        // );
         // MMIOS (CLINT etc.)
         verbose!("Registering MMIO...");
         for (start, end) in MMIO_RANGES {
@@ -293,7 +293,7 @@ impl MemLayout {
             }
         }
 
-        for (idx, p) in elf.program_header_iter().enumerate() {
+        for (_idx, p) in elf.program_header_iter().enumerate() {
             verbose!("Handling PH {:x?}", p);
             if p.ph_type() == ProgramType::LOAD {
                 let seg_start: VirtAddr = (p.vaddr() as usize).into();

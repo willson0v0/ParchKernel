@@ -304,7 +304,7 @@ impl PFSBase {
                 Ok((VirtAddr::from(mmap_start) + offset).read_data(length))
             }
         } else {
-            let fs = self.fs.upgrade().unwrap();
+            let _fs = self.fs.upgrade().unwrap();
             let mut result: Vec<u8> = Vec::new();
             let target = length + offset;
             while offset < target {

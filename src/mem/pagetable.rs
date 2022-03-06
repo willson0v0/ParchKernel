@@ -1,13 +1,72 @@
-use _core::mem::size_of;
+use core::mem::size_of;
 use alloc::vec::Vec;
 use bitflags::*;
 use riscv::register::satp;
 
 use core::fmt::{self, Debug, Formatter};
 
-use crate::{utils::{LogLevel, ErrorNum}, config::PAGE_SIZE, process::ProcessID};
+use crate::{utils::{LogLevel, ErrorNum}, config::{PAGE_SIZE, PHYS_END_ADDR}, process::ProcessID, mem::{VirtAddr, VPNRange}};
 
 use super::{PageGuard, PhysAddr, alloc_vm_page, types::{PhysPageNum, VirtPageNum}};
+
+use lazy_static::*;
+
+lazy_static!{
+    pub static ref PHYS_MEM_ENTRIES: PageTable = {
+        let mut res = PageTable::new_empty();
+        
+        extern "C" {
+            fn stext();
+            fn etext();
+            fn srodata();
+            fn erodata();
+            fn sdata();
+            fn edata();
+            fn sbss_with_stack();
+            fn ebss();
+            fn ekernel();
+        }
+        // map .data
+        
+        let regions: [(VirtPageNum, VirtPageNum, PTEFlags); 5] = [
+            (
+                VirtAddr::from(stext as usize).into(), 
+                VirtAddr::from(etext as usize).to_vpn_ceil(),
+                PTEFlags::R | PTEFlags::X
+            ),
+            (
+                VirtAddr::from(srodata as usize).into(), 
+                VirtAddr::from(erodata as usize).to_vpn_ceil(),
+                PTEFlags::R
+            ),
+            (
+                VirtAddr::from(sdata as usize).into(), 
+                VirtAddr::from(edata as usize).to_vpn_ceil(),
+                PTEFlags::R
+            ),
+            (
+                VirtAddr::from(sbss_with_stack as usize).into(), 
+                VirtAddr::from(ebss as usize).to_vpn_ceil(),
+                PTEFlags::R | PTEFlags::W
+            ),
+            (
+                VirtAddr::from(ekernel as usize).into(), 
+                VirtAddr::from(PHYS_END_ADDR.0).to_vpn_ceil(),
+                PTEFlags::R | PTEFlags::W
+            ),
+        ];
+        
+        
+        for (start, stop, flag) in regions {
+            for vpn in VPNRange::new(start, stop) {
+                res.map(vpn, PhysPageNum::from(vpn.0), flag);
+            }
+        }
+        debug!("PHYS_MEM_ENTRIES initialized.");
+        res
+    };
+}
+
 
 bitflags! {
     /// Pagetable entry flags, indicating privileges.
@@ -127,12 +186,18 @@ pub struct PageTable {
 }
 
 impl PageTable {
-    pub fn new() -> Self {
+    pub fn new_empty() -> Self {
         let root = alloc_vm_page();
         Self {
             root_ppn: root.ppn,
             pages: vec![root]
         }
+    }
+
+    pub fn new() -> Self {
+        let mut res = Self::new_empty();
+        res.load_entries(&PHYS_MEM_ENTRIES);
+        res
     }
 
     pub fn from_satp() -> Self {
@@ -294,6 +359,33 @@ impl PageTable {
             unsafe{pte_addr.write_volatile(&PageTableEntry::empty())}
         } else {
             panic!("unmapping free page")
+        }
+    }
+
+    pub fn load_entries(&mut self, source: &PageTable) {
+        for i in 0..(PAGE_SIZE / size_of::<PageTableEntry>()) {
+            let dst_root_pte_addr = PhysAddr::from(self.root_ppn) + i * size_of::<PageTableEntry>();
+            let src_root_pte_addr = PhysAddr::from(source.root_ppn) + i * size_of::<PageTableEntry>();
+            let src_pte_content: PageTableEntry = unsafe{src_root_pte_addr.read_volatile()};
+            if src_pte_content.valid() {
+                self.free_pte(dst_root_pte_addr, 2);
+                unsafe{dst_root_pte_addr.write_volatile(&src_pte_content);}
+            }
+        }
+    }
+
+    pub fn free_pte(&mut self, pte_addr: PhysAddr, level: usize) {
+        let pte_content: PageTableEntry = unsafe {pte_addr.read_volatile()};
+        if pte_content.valid() {
+            unsafe {pte_addr.write_volatile(&PageTableEntry::empty())};
+            if level != 0 {
+                let nxt_page = pte_content.ppn();
+                for i in 0..(PAGE_SIZE / size_of::<PageTableEntry>()) {
+                    self.free_pte(PhysAddr::from(nxt_page) + i * size_of::<PageTableEntry>(), level - 1);
+                }
+                // remove page
+                self.pages.retain(|x| x.ppn != nxt_page);
+            }
         }
     }
 }

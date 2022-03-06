@@ -1,4 +1,4 @@
-enum_with_tryfrom!{
+enum_with_tryfrom_usize!{
     #[repr(usize)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
     pub enum SignalNum {

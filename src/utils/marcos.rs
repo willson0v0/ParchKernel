@@ -33,7 +33,7 @@ macro_rules! CALL_SYSCALL {
 }
 
 #[macro_export]
-macro_rules! enum_with_tryfrom {
+macro_rules! enum_with_tryfrom_usize {
     ($(#[$meta:meta])* $vis:vis enum $name:ident {
         $($(#[$vmeta:meta])* $vname:ident $(= $val:expr)?,)*
     }) => {
@@ -48,6 +48,29 @@ macro_rules! enum_with_tryfrom {
             fn try_from(v: usize) -> Result<Self, Self::Error> {
                 match v {
                     $(x if x == $name::$vname as usize => Ok($name::$vname),)*
+                    _ => Err(crate::utils::ErrorNum::ENOSYS),
+                }
+            }
+        }
+    }
+}
+
+#[macro_export]
+macro_rules! enum_with_tryfrom_u16 {
+    ($(#[$meta:meta])* $vis:vis enum $name:ident {
+        $($(#[$vmeta:meta])* $vname:ident $(= $val:expr)?,)*
+    }) => {
+        $(#[$meta])*
+        $vis enum $name {
+            $($(#[$vmeta])* $vname $(= $val)?,)*
+        }
+
+        impl core::convert::TryFrom<u16> for $name {
+            type Error = crate::utils::ErrorNum;
+
+            fn try_from(v: u16) -> Result<Self, Self::Error> {
+                match v {
+                    $(x if x == $name::$vname as u16 => Ok($name::$vname),)*
                     _ => Err(crate::utils::ErrorNum::ENOSYS),
                 }
             }

@@ -4,11 +4,11 @@
 use alloc::borrow::ToOwned;
 use alloc::collections::VecDeque;
 use alloc::vec::Vec;
-use riscv::register::sstatus;
+
 use crate::mem::PhysAddr;
 use crate::utils::{SpinMutex, Mutex};
 use core::option::Option;
-use crate::process::{ pop_intr_off, push_intr_off, get_processor};
+use crate::process::{ get_processor};
 use lazy_static::*;
 use crate::config::UART0_ADDR;
 

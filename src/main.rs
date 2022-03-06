@@ -44,7 +44,7 @@ global_asm!(include_str!("interrupt/trampoline.asm"));
 global_asm!(include_str!("interrupt/u_trampoline.asm"));
 
 
-use riscv::register::{medeleg, mepc, mhartid, mideleg, mie, mscratch, mstatus, mtvec, pmpaddr0, pmpcfg0, satp, sie};
+use riscv::register::{medeleg, mepc, mideleg, mie, mscratch, mstatus, mtvec, pmpaddr0, pmpcfg0, satp, sie};
 
 use crate::process::get_hart_id;
 

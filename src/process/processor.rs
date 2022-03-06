@@ -10,14 +10,14 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use lazy_static::*;
 use crate::config::{MAX_CPUS, PROC_K_STACK_ADDR, PROC_K_STACK_SIZE};
-use crate::interrupt::{trap_return, fork_return};
+use crate::interrupt::{fork_return};
 use crate::mem::{MemLayout};
 use crate::process::ProcessControlBlock;
 use crate::process::pcb::ProcessStatus;
-use crate::utils::{Mutex, MutexGuard, LogLevel};
+use crate::utils::{MutexGuard};
 
 use super::pcb::PCBInner;
-use super::{dequeue, enqueue, INIT_PROCESS, free_current};
+use super::{dequeue, enqueue, INIT_PROCESS};
 
 global_asm!(include_str!("swtch.asm"));
 
@@ -186,7 +186,7 @@ impl Processor {
                     pcb_inner.status = ProcessStatus::Running;
                 }
                 let proc_context = pcb_inner.get_context();
-                let mut idle_context = self.get_context();
+                let idle_context = self.get_context();
                 // pcb_inner.mem_layout.pagetable.print(LogLevel::Verbose);
                 let proc_satp = pcb_inner.mem_layout.pagetable.satp(Some(proc.pid));
                 let scheuler_satp = self.inner.borrow().sche_mem_layout.as_ref().unwrap().pagetable.satp(None);

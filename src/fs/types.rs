@@ -30,15 +30,15 @@ pub struct Dirent {
 
 bitflags! {
     pub struct Permission: u16 {
-        const OWNER_R = 0400;
-        const OWNER_W = 0200;
-        const OWNER_X = 0100;
-        const GROUP_R = 0040;
-        const GROUP_W = 0020;
-        const GROUP_X = 0010;
-        const OTHER_R = 0004;
-        const OTHER_W = 0002;
-        const OTHER_X = 0001;
+        const OWNER_R = 0o400;
+        const OWNER_W = 0o200;
+        const OWNER_X = 0o100;
+        const GROUP_R = 0o040;
+        const GROUP_W = 0o020;
+        const GROUP_X = 0o010;
+        const OTHER_R = 0o004;
+        const OTHER_W = 0o002;
+        const OTHER_X = 0o001;
     }
 }
 
@@ -48,18 +48,20 @@ impl Permission {
     }
 }
 
-bitflags! {
-    pub struct FileType: u16 {
-        const SOCKET  = 0001;
-        const LINK    = 0002;
-        const REGULAR = 0004;
-        const BLOCK   = 0010;
-        const DIR     = 0020;
-        const CHAR    = 0040;
-        const FIFO    = 0100;
-        const UNKNOWN = 0200;
+enum_with_tryfrom_u16!(
+    #[repr(u16)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum FileType {
+        SOCKET  = 0o001,
+        LINK    = 0o002,
+        REGULAR = 0o004,
+        BLOCK   = 0o010,
+        DIR     = 0o020,
+        CHAR    = 0o040,
+        FIFO    = 0o100,
+        UNKNOWN = 0o200,
     }
-}
+);
 
 #[derive(Debug, Clone)]
 pub struct DEntry {

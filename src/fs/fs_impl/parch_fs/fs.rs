@@ -193,7 +193,11 @@ impl VirtualFileSystem for ParchFS {
                 path: Path::root(),
             } }))
         );
-        root_dir.open_dir(path, mode)
+        if path.is_root() {
+            Ok(root_dir.clone())
+        } else {
+            root_dir.open_dir(path, mode)
+        }
     }
 
     fn mkdir(&self, path: &crate::fs::Path) -> Result<(), crate::utils::ErrorNum> {

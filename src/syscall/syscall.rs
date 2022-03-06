@@ -1,10 +1,10 @@
 use core::mem::size_of;
 
-use alloc::{vec::Vec, sync::Arc, string::ToString, collections::LinkedList};
+use alloc::{vec::Vec, sync::Arc, collections::LinkedList};
 
-use crate::{process::{FileDescriptor, get_processor, push_sum_on, pop_sum_on, enqueue, ProcessControlBlock, ProcessStatus, ProcessID, get_process, SignalNum, free_current}, mem::{VirtAddr, VMASegment, SegmentFlags, ManagedSegment, VPNRange}, utils::{ErrorNum, Mutex}, fs::{Path, open, OpenMode}, interrupt::trap_context::TrapContext};
+use crate::{process::{FileDescriptor, get_processor, push_sum_on, pop_sum_on, enqueue, ProcessStatus, ProcessID, get_process, SignalNum, free_current}, mem::{VirtAddr, VMASegment, SegmentFlags, ManagedSegment, VPNRange}, utils::{ErrorNum}, fs::{Path, open, OpenMode}, interrupt::trap_context::TrapContext};
 
-use super::{syscall_num::*, types::{self, MMAPProt, MMAPFlag}};
+use super::{syscall_num::*, types::{MMAPProt, MMAPFlag}};
 
 pub fn syscall(syscall_id: usize, args: [usize; 6]) -> Result<usize, ErrorNum> {
     let do_trace = get_processor().current().unwrap().get_inner().trace_enabled[syscall_id];
@@ -55,11 +55,12 @@ pub fn sys_open(path: VirtAddr, open_mode: usize) -> Result<usize, ErrorNum> {
     let mut proc_inner = proc.get_inner();
     let open_mode = OpenMode::from_bits_truncate(open_mode);
     let path = path.read_cstr()?.0;
-    let path: Path = if path.starts_with('/') {
+    let mut path: Path = if path.starts_with('/') {
         path.into()
     } else {
         proc_inner.cwd.concat(&path.into())
     };
+    path.reduce();
     let file = open(&path, open_mode)?;
     Ok(proc_inner.register_file(file)?.0)
 }
@@ -114,7 +115,7 @@ pub fn sys_exec(elf_path: VirtAddr, argv: VirtAddr) -> Result<usize, ErrorNum> {
     let mut args: Vec<Vec<u8>> = Vec::new();
     let mut p = argv;
     if p.0 != 0 {
-        let intr_guard = get_processor();
+        let _intr_guard = get_processor();
         push_sum_on();
         loop {
             let argv_str: VirtAddr = unsafe{ p.read_volatile() };
@@ -139,7 +140,7 @@ pub fn sys_exit(exit_code: isize) -> Result<usize, ErrorNum> {
     // un-register it from process manager
     free_current();
     processor.exit_switch(exit_code);
-    unreachable!("This part should be unreachable. Go check __switch.")
+    // unreachable!("This part should be unreachable. Go check __switch.")
 }
 
 pub fn sys_mmap(tgt_addr: VirtAddr, length: usize, prot: MMAPProt, flag: MMAPFlag, fd: FileDescriptor, offset: usize) -> Result<usize, ErrorNum> {
@@ -218,7 +219,8 @@ pub fn sys_waitpid(pid: isize, exit_code: VirtAddr) -> Result<usize, ErrorNum> {
             let corpse_inner = corpse.get_inner();
             // make sure its data got released
             // 1 here, 2 in scheduler context (maybe)
-            assert!(Arc::strong_count(&corpse) <= 2, "Zombie {:?} was referenced by something else, strong_count = {}", corpse.pid, Arc::strong_count(&corpse));
+            // NOTE: in multicore, it can be referenced by other cores.
+            // assert!(Arc::strong_count(&corpse) <= 2, "Zombie {:?} was referenced by something else, strong_count = {}", corpse.pid, Arc::strong_count(&corpse));
             info!("Zombie {:?} was killed.", corpse.pid);
             push_sum_on();
             unsafe{exit_code.write_volatile(&corpse_inner.exit_code.unwrap());}
@@ -273,7 +275,7 @@ pub fn sys_getcwd(buf: VirtAddr, length: usize) -> Result<usize, ErrorNum> {
         path = path[..length-1].to_vec();
     }
     path.push(0);
-    let int_guard = get_processor();
+    let _int_guard = get_processor();
     push_sum_on();
     unsafe{buf.write_data(path);}
     pop_sum_on();
@@ -284,11 +286,12 @@ pub fn sys_chdir(buf: VirtAddr) -> Result<usize, ErrorNum> {
     let proc = get_processor().current().unwrap();
     let mut proc_inner = proc.get_inner();
     let path = buf.read_cstr()?.0;
-    let path: Path = if path.starts_with('/') {
+    let mut path: Path = if path.starts_with('/') {
         path.into()
     } else {
         proc_inner.cwd.concat(&path.into())
     };
+    path.reduce();
     open(&path, OpenMode::SYS)?.as_dir()?; // check if it's actually a dir
     proc_inner.cwd = path;
     Ok(0)

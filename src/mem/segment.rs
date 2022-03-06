@@ -1,8 +1,8 @@
 use core::fmt::{self, Debug, Formatter};
 
 use core::cmp::min;
-use core::ops::{Deref, DerefMut};
-use alloc::string::String;
+
+
 use alloc::{sync::{Arc}, collections::BTreeMap, vec::Vec, borrow::ToOwned};
 use bitflags::*;
 use crate::{config::{PAGE_SIZE, PROC_K_STACK_SIZE, PROC_K_STACK_ADDR, PROC_U_STACK_SIZE, PROC_U_STACK_ADDR}, utils::{SpinMutex, Mutex}};
@@ -335,7 +335,7 @@ impl Segment for IdenticalMappingSegment {
     }
 
     fn do_lazy(&self, vpn: VirtPageNum, pagetable: &mut PageTable) -> Result<(), ErrorNum> {
-        let mut inner = self.0.acquire();
+        let inner = self.0.acquire();
         if inner.range.contains(vpn) {
             let ppn = PhysPageNum(vpn.0);
             pagetable.map(vpn, ppn, inner.flag.into());
@@ -373,7 +373,7 @@ impl Segment for ManagedSegment {
             let pageguard = alloc_vm_page();
             let ppn = pageguard.ppn;
 
-            if let Some(source) = inner.clone_source.take() {
+            if let Some(source) = inner.clone_source.clone() {
                 let source_ppn = source.0.acquire().frames.get(&vpn).unwrap().ppn;
                 unsafe {PhysPageNum::copy_page(&source_ppn, &ppn)}
             }
@@ -381,6 +381,7 @@ impl Segment for ManagedSegment {
             pagetable.map(vpn, ppn, inner.flag.into());
             inner.frames.insert(vpn, pageguard);
         }
+        inner.clone_source.take();
         inner.status = SegmentStatus::Mapped;
         Ok(())
     }
@@ -587,7 +588,7 @@ impl Segment for TrampolineSegment {
         Ok(Self::new())
     }
 
-    fn do_lazy(&self, vpn: VirtPageNum, pagetable: &mut PageTable) -> Result<(), ErrorNum> {
+    fn do_lazy(&self, _vpn: VirtPageNum, _pagetable: &mut PageTable) -> Result<(), ErrorNum> {
         panic!("TrampolineSegment no lazy");
     }
 }
@@ -647,7 +648,7 @@ impl Segment for UTrampolineSegment {
         Ok(Self::new())
     }
 
-    fn do_lazy(&self, vpn: VirtPageNum, pagetable: &mut PageTable) -> Result<(), ErrorNum> {
+    fn do_lazy(&self, _vpn: VirtPageNum, _pagetable: &mut PageTable) -> Result<(), ErrorNum> {
         panic!("UTrampolineSegment no lazy");
     }
 }
@@ -711,7 +712,7 @@ impl Segment for TrapContextSegment {
         Ok(Self::new(Some(self.clone())))
     }
 
-    fn do_lazy(&self, vpn: VirtPageNum, pagetable: &mut PageTable) -> Result<(), ErrorNum> {
+    fn do_lazy(&self, _vpn: VirtPageNum, _pagetable: &mut PageTable) -> Result<(), ErrorNum> {
         panic!("TrapContextSegment no lazy");
     }
 }
@@ -785,7 +786,7 @@ impl Segment for ProcKStackSegment {
         Ok(Self::new())
     }
 
-    fn do_lazy(&self, vpn: VirtPageNum, pagetable: &mut PageTable) -> Result<(), ErrorNum> {
+    fn do_lazy(&self, _vpn: VirtPageNum, _pagetable: &mut PageTable) -> Result<(), ErrorNum> {
         panic!("ProcKStack no lazy");
     }
 }
@@ -820,18 +821,19 @@ impl Segment for ProcUStackSegment {
             let pageguard = alloc_vm_page();
             let ppn = pageguard.ppn;
 
-            if let Some(source) = inner.clone_source.take() {
+            if let Some(source) = inner.clone_source.clone() {
                 let source_ppn = source.0.acquire().pages.get(i).unwrap().ppn;
                 unsafe {PhysPageNum::copy_page(&source_ppn, &ppn)};
             }
 
-            pagetable.map(
+            pagetable.map(  
                 start_vpn + i,
                 ppn, 
                 PTEFlags::R | PTEFlags::W | PTEFlags::U
             );
             inner.pages.push(pageguard)
         }
+        inner.clone_source.take();
         inner.status = SegmentStatus::Mapped;
         Ok(())
     }
@@ -865,7 +867,7 @@ impl Segment for ProcUStackSegment {
         Ok(Self::new(Some(self.clone())))
     }
 
-    fn do_lazy(&self, vpn: VirtPageNum, pagetable: &mut PageTable) -> Result<(), ErrorNum> {
+    fn do_lazy(&self, _vpn: VirtPageNum, _pagetable: &mut PageTable) -> Result<(), ErrorNum> {
         panic!("ProcUStack no lazy");
     }
 }

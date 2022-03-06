@@ -1,5 +1,6 @@
 use core::fmt::{Debug, Formatter};
 
+use alloc::borrow::ToOwned;
 use alloc::string::ToString;
 use alloc::{sync::Arc, string::String, vec::Vec};
 use alloc::collections::VecDeque;
@@ -99,10 +100,14 @@ impl Path {
     }
 
     pub fn root() -> Self{
-        "/".into()
+        let res: Path = "/".into();
+        assert!(res.len() == 0);
+        res
     }
 
     pub fn starts_with(&self, prefix: &Path) -> bool {
+        if prefix.len() == 0 {return true;}
+        if prefix.len() > self.len() {return false;}
         for (this_i, pre_i) in self.components.iter().zip(prefix.components.iter()) {
             if this_i != pre_i {
                 return false;
@@ -160,6 +165,18 @@ impl Path {
         Self {
             components
         }
+    }
+
+    pub fn reduce(&mut self) {
+        let mut new_component = Vec::new();
+        for c in self.components.clone().into_iter() {
+            if c == ".." && new_component.len() != 0{
+                new_component.pop();
+            } else  if c != "." {
+                new_component.push(c);
+            }
+        }
+        self.components = new_component;
     }
 }
 
