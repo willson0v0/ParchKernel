@@ -24,6 +24,7 @@ chrono = "0.4"
 csv = "1.1.6"
 
 [features]
+default         = ["log_verbose"    ]
 log_fatal       = [                 ]
 log_milestone   = ["log_fatal"      ]
 log_error 		= ["log_milestone"  ]

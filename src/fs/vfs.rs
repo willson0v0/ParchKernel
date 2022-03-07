@@ -169,15 +169,22 @@ impl Path {
     }
 
     pub fn reduce(&mut self) {
-        let mut new_component = Vec::new();
+        let mut new_component = VecDeque::new();
         for c in self.components.clone().into_iter() {
             if c == ".." && new_component.len() != 0{
-                new_component.pop();
-            } else  if c != "." {
-                new_component.push(c);
+                new_component.pop_back();
+            } else if c != "." {
+                new_component.push_back(c);
             }
         }
-        self.components = new_component;
+        while let Some(f) = new_component.front() {
+            if f == ".." {
+                new_component.pop_front();
+            } else {
+                break;
+            }
+        }
+        self.components = new_component.into();
     }
 }
 

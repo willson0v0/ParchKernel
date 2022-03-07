@@ -336,7 +336,7 @@ impl PageTable {
         let pte_content = PageTableEntry::new(ppn, flags | PTEFlags::V);
         unsafe{
             if pte_addr.read_volatile::<PageTableEntry>().valid() {
-                panic!("remap!");
+                panic!("remap {:?}!", vpn);
             }
             pte_addr.write_volatile(&pte_content);
         }

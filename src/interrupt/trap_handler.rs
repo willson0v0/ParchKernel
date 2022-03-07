@@ -9,7 +9,7 @@ use riscv::register::{scause::{   // s cause register
     }, sepc, sip, sstatus::{self, SPP}, stval, stvec};
 
 use super::PLIC0;
-use crate::{config::{UART0_IRQ, TRAMPOLINE_ADDR, PROC_K_STACK_ADDR, PROC_K_STACK_SIZE, TRAP_CONTEXT_ADDR, PROC_U_STACK_ADDR, PROC_U_STACK_SIZE, U_TRAMPOLINE_ADDR, PHYS_END_ADDR}, process::{get_processor, ProcessStatus, intr_off, get_hart_id, intr_on, def_handler::def_ignore, SignalNum}, mem::{VirtAddr, PhysPageNum, PhysAddr, PPNRange, PageTable, PTEFlags}, interrupt::trap_context::TrapContext, syscall::syscall, utils::Mutex};
+use crate::{config::{UART0_IRQ, TRAMPOLINE_ADDR, PROC_K_STACK_ADDR, PROC_K_STACK_SIZE, TRAP_CONTEXT_ADDR, PROC_U_STACK_ADDR, PROC_U_STACK_SIZE, U_TRAMPOLINE_ADDR, PHYS_END_ADDR}, process::{get_processor, ProcessStatus, intr_off, get_hart_id, intr_on, def_handler::def_ignore, SignalNum}, mem::{VirtAddr, PhysPageNum, PhysAddr, PPNRange, PageTable, PTEFlags}, interrupt::trap_context::TrapContext, syscall::{syscall, syscall_num::SYSCALL_EXEC}, utils::Mutex};
 use crate::utils::UART0;
 
 /// Set trap entry to kernel trap handling function.
@@ -151,10 +151,14 @@ pub fn user_trap() -> ! {
                 intr_on();
                 let res = syscall(syscall_id, args);
                 if let Ok(ret_val) = res {
-                    trap_context.a0 = ret_val;
+                    if syscall_id != SYSCALL_EXEC{
+                        trap_context.a0 = ret_val;
+                        trap_context.a1 = 0;
+                    }
                 } else {
                     warning!("Syscall {} failed with {:?}", syscall_id, res);
                     trap_context.a0 = res.unwrap_err().to_ret();
+                    trap_context.a1 = usize::MAX;
                 }
             },
             Trap::Interrupt(Interrupt::SupervisorTimer) => {

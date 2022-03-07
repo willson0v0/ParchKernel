@@ -314,7 +314,7 @@ impl MemLayout {
                     seg_flag = seg_flag | SegmentFlags::W;
                 }
                 let segment = ManagedSegment::new(
-                    VPNRange::new(seg_start, seg_end + 1), 
+                    VPNRange::new(seg_start, seg_end), 
                     SegmentFlags::W | SegmentFlags::R, 
                     None,
                     p.memsz() as usize
