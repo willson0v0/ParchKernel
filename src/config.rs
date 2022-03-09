@@ -33,3 +33,7 @@ pub const INIT_PROCESS_PATH      : &str = "/init_proc";
 
 pub const MAX_FD            : usize = 4096;
 pub const MAX_SYSCALL       : usize = 64;
+
+pub const MAX_LINK_RECURSE  : usize = 32;
+
+pub const UUID_LENGTH: usize = 16;  // 16 bytes

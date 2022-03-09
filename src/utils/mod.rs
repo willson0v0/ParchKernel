@@ -12,11 +12,21 @@ mod error;
 pub mod riscv;
 pub mod elf_rs_wrapper;
 pub mod range;
+mod random;
+
+pub use random::{
+    rand_usize,
+    UUID
+};
 
 pub use lock::{
     SpinMutex,
     MutexGuard,
-    Mutex
+    Mutex,
+    SpinRWLock,
+    RWLockReadGuard,
+    RWLockWriteGuard,
+    RWLock
 };
 
 pub use uart::{

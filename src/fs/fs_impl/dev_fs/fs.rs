@@ -1,14 +1,14 @@
-use crate::{fs::{VirtualFileSystem, Path, File, DirFile, types::{FileStat, Permission}, OpenMode, Dirent, open}, utils::ErrorNum};
+use crate::{fs::{VirtualFileSystem, Path, File, DirFile, types::{FileStat, Permission}, OpenMode, Dirent, DummyLink}, utils::{ErrorNum, UUID}};
 use core::fmt::Debug;
 
-use alloc::{sync::Arc, string::ToString};
+use alloc::{sync::Arc, string::{ToString, String}};
 use lazy_static::*;
 
 use super::UartPTS;
 
 lazy_static!{
     pub static ref DEV_FS: Arc<DevFS> = {
-        let res = Arc::new(DevFS());
+        let res = Arc::new(DevFS(UUID::new()));
         milestone!("DevFS initialized.");
         res
     };
@@ -22,7 +22,9 @@ lazy_static!{
     };
 }
 
-pub struct DevFS();
+pub struct DevFS(pub UUID);
+
+#[derive(Debug)]
 pub struct DevFolder();
 
 impl Debug for DevFS {
@@ -32,27 +34,7 @@ impl Debug for DevFS {
 }
 
 impl VirtualFileSystem for DevFS {
-    fn open(&self, path: &crate::fs::Path, mode: crate::fs::OpenMode) -> Result<alloc::sync::Arc<dyn crate::fs::File>, crate::utils::ErrorNum> {
-        DevFolder{}.open_dir(path, mode)
-    }
-
-    fn mkdir(&self, _path: &crate::fs::Path) -> Result<(), crate::utils::ErrorNum> {
-        Err(ErrorNum::EPERM)
-    }
-
-    fn mkfile(&self, _path: &crate::fs::Path) -> Result<(), crate::utils::ErrorNum> {
-        Err(ErrorNum::EPERM)
-    }
-
-    fn remove(&self, _path: &crate::fs::Path) -> Result<(), crate::utils::ErrorNum> {
-        Err(ErrorNum::EPERM)
-    }
-
     fn link(&self, _dest: alloc::sync::Arc<dyn crate::fs::File>, _link_file: &crate::fs::Path) -> Result<alloc::sync::Arc<dyn crate::fs::File>, crate::utils::ErrorNum> {
-        Err(ErrorNum::EPERM)
-    }
-
-    fn sym_link(&self, _abs_src: &crate::fs::Path, _rel_dst: &crate::fs::Path) -> Result<alloc::sync::Arc<dyn crate::fs::LinkFile>, crate::utils::ErrorNum> {
         Err(ErrorNum::EPERM)
     }
 
@@ -63,11 +45,17 @@ impl VirtualFileSystem for DevFS {
     fn as_vfs<'a>(self: Arc<Self>) -> Arc<dyn VirtualFileSystem + 'a> where Self: 'a {
         self
     }
-}
 
-impl Debug for DevFolder {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_tuple("DevFolder").finish()
+    fn get_uuid(&self) -> crate::utils::UUID {
+        self.0.clone()
+    }
+
+    fn root_dir(&self, _mode: OpenMode) -> Result<Arc<dyn DirFile>, ErrorNum> {
+        Ok(DEV_FOLDER.clone())
+    }
+
+    fn as_any<'a>(self: Arc<Self>) -> Arc<dyn core::any::Any + Send + Sync> {
+        self
     }
 }
 
@@ -108,7 +96,15 @@ impl File for DevFolder {
         Err(ErrorNum::EBADTYPE)
     }
 
+    fn as_mount<'a>(self: Arc<Self>) -> Result<Arc<dyn crate::fs::MountPoint   + 'a>, ErrorNum> where Self: 'a {
+        Err(ErrorNum::EBADTYPE)
+    }
+
     fn as_file<'a>(self: Arc<Self>) -> Arc<dyn File + 'a> where Self: 'a {
+        self
+    }
+
+    fn as_any<'a>(self: Arc<Self>) -> Arc<dyn core::any::Any + Send + Sync + 'a> where Self: 'a {
         self
     }
 
@@ -128,15 +124,17 @@ impl File for DevFolder {
 }
 
 impl DirFile for DevFolder {
-    fn open_dir(&self, rel_path: &Path, mode: crate::fs::OpenMode) -> Result<Arc<dyn File>, ErrorNum> {
-        if rel_path == &"pts".into() {
+    fn open_entry(&self, entry_name: &String, mode: crate::fs::OpenMode) -> Result<Arc<dyn File>, ErrorNum> {
+        if entry_name == "pts" {
             Ok(Arc::new(UartPTS{mode}))
-        } else if rel_path == &".".into() || rel_path.is_root() {
-            Ok(Arc::new(Self{}))
-        } else if rel_path == &"..".into() {
-            let mut upper_dir = DEV_FS.mount_path().append("..".to_string()).unwrap();
-            upper_dir.reduce();
-            open(&upper_dir, mode)
+        } else if entry_name == "." {
+            Ok(DEV_FOLDER.clone())
+        } else if entry_name == ".." {
+            Ok(Arc::new(DummyLink{
+                vfs: DEV_FS.clone(),
+                link_dest: DEV_FS.mount_path().strip_tail(),
+                self_path: DEV_FS.mount_path(),
+            }))
         } else {
             Err(ErrorNum::ENOENT)
         }
@@ -156,5 +154,13 @@ impl DirFile for DevFolder {
             Dirent{ inode: 0, permission: Permission::default(), f_type: crate::fs::types::FileType::DIR, f_name: "..".to_string() },
             Dirent{ inode: 0, permission: Permission::default(), f_type: crate::fs::types::FileType::CHAR, f_name: "pts".to_string() },
         ])
+    }
+
+    fn register_mount(&self, _dentry_name: alloc::string::String, _uuid: UUID) -> Result<(), ErrorNum> {
+        Err(ErrorNum::EPERM)
+    }
+
+    fn register_umount(&self, _dentry_name: alloc::string::String) -> Result<UUID, ErrorNum> {
+        Err(ErrorNum::EPERM)
     }
 }

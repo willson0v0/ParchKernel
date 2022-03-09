@@ -247,23 +247,24 @@ impl Processor {
     }
 
     pub fn exit_switch(&self, exit_code: isize) -> ! {
+        // get init first, to avoid deadlock
+        // in waitpid, we always get self.inner first, then get childres;
+        // so we must use the same lock acquire sequence here,
+        // that is, parent first, children last.
+        let mut init_inner = INIT_PROCESS.get_inner();
         let proc = self.take_current().unwrap();
         let mut pcb_inner = proc.get_inner();
         pcb_inner.status = ProcessStatus::Zombie;
         pcb_inner.exit_code = Some(exit_code);
 
-        // let init proc to take all child process
-        // TODO: potential dead lock caused by proc lock order.
-        {
-            let mut init_inner = INIT_PROCESS.get_inner();
-            for child in &pcb_inner.children {
-                child.get_inner().parent = Some(Arc::downgrade(&INIT_PROCESS));
-                init_inner.children.push_back(child.clone());
-            }
+        for child in &pcb_inner.children {
+            child.get_inner().parent = Some(Arc::downgrade(&INIT_PROCESS));
+            init_inner.children.push_back(child.clone());
         }
         
         pcb_inner.children.clear();
         drop(pcb_inner);
+        drop(init_inner);
         // deduct proc's refcnt for it will not be dropped.
         // Arc's final drop will not happen here, for parent of this process must held ref to this process, so it's safe to do so.
         unsafe {

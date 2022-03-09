@@ -1,4 +1,4 @@
-use crate::{fs::{vfs::OpenMode, fs_impl::parch_fs::{BAD_BLOCK, BLOCKNO_PER_BLK, PFS_MAXCAP}, Path, types::FileType, Cursor}, mem::{PageGuard, VirtPageNum, claim_fs_page, VirtAddr}, utils::{ErrorNum, Mutex, MutexGuard, time::get_real_time_epoch}};
+use crate::{fs::{vfs::OpenMode, fs_impl::parch_fs::{BAD_BLOCK, BLOCKNO_PER_BLK, PFS_MAXCAP, PFSType}, Path, types::FileType, Cursor}, mem::{PageGuard, VirtPageNum, claim_fs_page, VirtAddr}, utils::{ErrorNum, Mutex, MutexGuard, time::get_real_time_epoch, UUID}};
 use super::{DIRECT_BLK_COUNT, BLK_SIZE, fs::{ParchFS, ParchFSInner}, BlockNo, INodeNo, PFSINode};
 
 
@@ -364,6 +364,18 @@ impl PFSBase {
             let block_no = self.get_blockno(offset, false)?;
             let block_ppn = ParchFS::blockno_2_ppn(block_no);
             Ok(claim_fs_page(block_ppn))
+        }
+    }
+
+    pub fn get_mount_uuid(&self) -> Result<UUID, ErrorNum> {
+        let fs = self.fs.upgrade().unwrap();
+        let mut fs_inner = fs.inner.acquire();
+        let inode_guard = fs_inner.get_inode(self.inode_no)?;
+        let inode = inode_guard.acquire();
+        if inode.f_type != PFSType::MOUNT {
+            Err(ErrorNum::EBADTYPE)
+        } else {
+            Ok(UUID::from_bytes(inode.mount_info))
         }
     }
 }

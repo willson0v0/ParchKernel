@@ -55,13 +55,10 @@ impl<T> MutexGuard<'_, T> {
         }
     }
 }
-
-// TODO: Implement R/W lock
 pub struct SpinMutex<T> {
     is_acquired  : AtomicBool,
     name        : String,
-    data        : UnsafeCell<T>,
-    did_push_off : UnsafeCell<bool>
+    data        : UnsafeCell<T>
 }
 
 impl<T> SpinMutex<T> {
@@ -69,8 +66,7 @@ impl<T> SpinMutex<T> {
         Self {
             is_acquired: AtomicBool::new(false),
             name: String::from(name),
-            data: UnsafeCell::new(data),
-            did_push_off: UnsafeCell::new(true)
+            data: UnsafeCell::new(data)
         }
     }
 }
@@ -81,16 +77,12 @@ impl<T> Mutex<T> for SpinMutex<T> {
         while self.is_acquired.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
             // spin wait
         }
-        // change after lock has been successfully acquired, thus refcell is safe to change
-        unsafe{*self.did_push_off.get() = true;}
         MutexGuard{mutex: self}
     }
 
     fn release(&self) {
         unsafe {self.force_unlock();}
-        if unsafe{*self.did_push_off.get()} {
-            pop_intr_off();
-        }
+        pop_intr_off();
     }
 
     fn get_data(&self) -> &mut T {
@@ -194,3 +186,127 @@ unsafe impl<T> Send for SpinMutex<T> where T: Send {}
 unsafe impl<T> Sync for SpinMutex<T> where T: Send {}
 unsafe impl<T> Send for MutexGuard<'_, T> where T: Send {}
 unsafe impl<T> Sync for MutexGuard<'_, T> where T: Send + Sync {}
+
+pub trait RWLock<T> {
+    fn acquire_r(&self) -> RWLockReadGuard<'_, T>;
+    fn acquire_w(&self) -> RWLockWriteGuard<'_, T>;
+    fn release_r(&self);
+    fn release_w(&self);
+    fn get_data(&self) -> &mut T;
+}
+
+pub struct RWLockReadGuard<'a, T> {
+    mutex: &'a dyn RWLock<T>
+}
+
+pub struct RWLockWriteGuard<'a, T> {
+    mutex: &'a dyn RWLock<T>
+}
+pub struct SpinRWLock<T> {
+    write_mutex         : AtomicBool,
+    reader_count        : SpinMutex<usize>,
+    data                : UnsafeCell<T>
+}
+
+impl<T> SpinRWLock<T> {
+    pub fn new(data: T) -> Self {
+        Self {
+            write_mutex: AtomicBool::new(false),
+            reader_count: SpinMutex::new("rw lock mutex", 0),
+            data: UnsafeCell::new(data),
+        }
+    }
+}
+
+impl<T> RWLock<T> for SpinRWLock<T> {
+    fn acquire_r(&self) -> RWLockReadGuard<'_, T> {
+        // lock the lock itself;
+        let mut lock_guard = self.reader_count.acquire();
+
+        *lock_guard += 1;
+
+        if *lock_guard == 1 {
+            push_intr_off();
+            // data alter, wait for write to finish
+            while self.write_mutex.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
+                // spin wait
+            }
+        }
+        
+        RWLockReadGuard { mutex: self }
+    }
+
+    fn acquire_w(&self) -> RWLockWriteGuard<'_, T> {
+        push_intr_off();
+        while self.write_mutex.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
+            // spin wait
+        }
+        RWLockWriteGuard{mutex: self}
+    }
+
+    fn release_r(&self) {
+        // try to lock lock itself;
+        let mut lock_guard = self.reader_count.acquire();
+
+        *lock_guard -= 1;
+
+        if *lock_guard == 0 {
+            if self.write_mutex.compare_exchange(true, false, Ordering::SeqCst, Ordering::SeqCst).is_err() {
+                panic!("RWLocked must be locked to be unlocked")
+            }
+            pop_intr_off();
+        }
+    }
+
+    fn release_w(&self) {
+        if self.write_mutex.compare_exchange(true, false, Ordering::SeqCst, Ordering::SeqCst).is_err() {
+            panic!("RWLocked must be locked to be unlocked")
+        }
+        pop_intr_off();
+    }
+
+    fn get_data(&self) -> &mut T {
+        unsafe {&mut *self.data.get()}
+    }
+}
+
+
+impl<T> Deref for RWLockReadGuard<'_, T> {
+    type Target = T;
+    fn deref(&self) -> &Self::Target {
+        self.mutex.get_data()
+    }
+}
+
+impl<T> Deref for RWLockWriteGuard<'_, T> {
+    type Target = T;
+    fn deref(&self) -> &Self::Target {
+        self.mutex.get_data()
+    }
+}
+
+impl<T> DerefMut for RWLockWriteGuard<'_, T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.mutex.get_data()
+    }
+}
+
+impl<T> Drop for RWLockReadGuard<'_, T> {
+    fn drop(&mut self) {
+        self.mutex.release_r()
+    }
+}
+
+impl<T> Drop for RWLockWriteGuard<'_, T> {
+    fn drop(&mut self) {
+        self.mutex.release_w()
+    }
+}
+
+
+unsafe impl<T> Send for SpinRWLock<T> where T: Send {}
+unsafe impl<T> Sync for SpinRWLock<T> where T: Send {}
+unsafe impl<T> Send for RWLockReadGuard<'_, T> where T: Send {}
+unsafe impl<T> Sync for RWLockReadGuard<'_, T> where T: Send + Sync {}
+unsafe impl<T> Send for RWLockWriteGuard<'_, T> where T: Send {}
+unsafe impl<T> Sync for RWLockWriteGuard<'_, T> where T: Send + Sync {}

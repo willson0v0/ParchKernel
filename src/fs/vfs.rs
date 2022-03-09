@@ -1,13 +1,14 @@
 use core::fmt::{Debug, Formatter};
 
 
+use core::any::Any;
 use alloc::string::ToString;
 use alloc::{sync::Arc, string::String, vec::Vec};
 use alloc::collections::VecDeque;
 use bitflags::*;
-use super::{File, LinkFile};
+use super::{File, DirFile};
 use crate::mem::SegmentFlags;
-use crate::utils::ErrorNum;
+use crate::utils::{ErrorNum, UUID};
 
 bitflags! {
     /// fs flags
@@ -41,15 +42,12 @@ impl Into<SegmentFlags> for OpenMode {
 }
 
 pub trait VirtualFileSystem : Send + Sync + Debug {
-    fn open(&self, path: &Path, mode: OpenMode) -> Result<Arc<dyn File>, ErrorNum>;
-    fn mkdir(&self, path: &Path) -> Result<(), ErrorNum>;
-    fn mkfile(&self, path: &Path) -> Result<(), ErrorNum>;
-    // TODO: chmod
-    fn remove(&self, path: &Path) -> Result<(), ErrorNum>;
     fn link(&self, dest: Arc<dyn File>, link_file: &Path) -> Result<Arc<dyn File>, ErrorNum>;
-    fn sym_link(&self, abs_src: &Path, rel_dst: &Path) -> Result<Arc<dyn LinkFile>, ErrorNum>;
     fn mount_path(&self) -> Path;
     fn as_vfs<'a>(self: Arc<Self>) -> Arc<dyn VirtualFileSystem + 'a> where Self: 'a;
+    fn get_uuid(&self) -> UUID;
+    fn root_dir(&self, mode: OpenMode) -> Result<Arc<dyn DirFile>, ErrorNum>;
+    fn as_any<'a>(self: Arc<Self>) -> Arc<dyn Any + Send + Sync>;
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -169,6 +167,11 @@ impl Path {
     }
 
     pub fn reduce(&mut self) {
+        *self = self.to_reduce();
+    }
+
+    
+    pub fn to_reduce(&self) -> Self {
         let mut new_component = VecDeque::new();
         for c in self.components.clone().into_iter() {
             if c == ".." && new_component.len() != 0{
@@ -184,7 +187,7 @@ impl Path {
                 break;
             }
         }
-        self.components = new_component.into();
+        Self{components: new_component.into()}
     }
 }
 

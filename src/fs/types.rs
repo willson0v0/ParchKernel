@@ -1,9 +1,11 @@
 use core::fmt::Debug;
+use core::any::Any;
 use alloc::string::String;
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
+
 use crate::mem::{PageGuard, MemLayout, VirtPageNum};
-use crate::utils::ErrorNum;
+use crate::utils::{ErrorNum, UUID};
 
 use super::vfs::OpenMode;
 use super::{VirtualFileSystem, Path};
@@ -60,6 +62,7 @@ enum_with_tryfrom_u16!(
         CHAR    = 0o040,
         FIFO    = 0o100,
         UNKNOWN = 0o200,
+        MOUNT   = 0o400,
     }
 );
 
@@ -89,23 +92,115 @@ pub trait File: Send + Sync + Debug {
     fn as_dir       <'a>(self: Arc<Self>) -> Result<Arc<dyn DirFile      + 'a>, ErrorNum> where Self: 'a;
     fn as_char      <'a>(self: Arc<Self>) -> Result<Arc<dyn CharFile     + 'a>, ErrorNum> where Self: 'a;
     fn as_fifo      <'a>(self: Arc<Self>) -> Result<Arc<dyn FIFOFile     + 'a>, ErrorNum> where Self: 'a;
+    fn as_mount     <'a>(self: Arc<Self>) -> Result<Arc<dyn MountPoint   + 'a>, ErrorNum> where Self: 'a;
     fn as_file      <'a>(self: Arc<Self>) -> Arc<dyn File + 'a> where Self: 'a;
+    fn as_any       <'a>(self: Arc<Self>) -> Arc<dyn Any + Send + Sync + 'a> where Self: 'a;
     fn vfs              (&self) -> Arc<dyn VirtualFileSystem>;
     fn stat             (&self) -> Result<FileStat, ErrorNum>;
 }
 
 pub trait SocketFile    : File {}
-pub trait LinkFile      : File {}
+pub trait LinkFile      : File {
+    fn read_link(&self) -> Result<Path, ErrorNum>;
+    fn write_link(&self, path: &Path) -> Result<(), ErrorNum>;
+}
 pub trait RegularFile   : File {
     fn get_page(&self, offset: usize) -> Result<PageGuard, ErrorNum>;
     fn register_mmap(self: Arc<Self>, mem_layout: &mut MemLayout, offset: usize, length: usize) -> Result<VirtPageNum, ErrorNum>;
 }
 pub trait BlockFile     : File {}
 pub trait DirFile       : File {
-    fn open_dir(&self, rel_path: &Path, mode: OpenMode) -> Result<Arc<dyn File>, ErrorNum>;
+    fn open_entry(&self, entry_name: &String, mode: OpenMode) -> Result<Arc<dyn File>, ErrorNum>;
     fn make_file(&self, name: String, perm: Permission, f_type: FileType) -> Result<Arc<dyn File>, ErrorNum>;
     fn remove_file(&self, name: String) -> Result<(), ErrorNum>;
     fn read_dirent(&self) -> Result<Vec<Dirent>, ErrorNum>;
+    fn register_mount(&self, dentry_name: String, uuid: UUID) -> Result<(), ErrorNum>;
+    fn register_umount(&self, dentry_name: String) -> Result<UUID, ErrorNum>;
 }
 pub trait CharFile      : File {}
 pub trait FIFOFile      : File {}
+
+pub trait MountPoint    : File {
+    fn get_uuid(&self) -> UUID;
+}
+
+#[derive(Debug)]
+pub struct DummyLink {
+    pub vfs: Arc<dyn VirtualFileSystem>,
+    pub link_dest: Path,
+    pub self_path: Path,
+}
+
+impl File for DummyLink {
+    fn write(&self, _data: alloc::vec::Vec::<u8>) -> Result<usize, crate::utils::ErrorNum> {
+        Err(ErrorNum::EPERM)
+    }
+
+    fn read(&self, _length: usize) -> Result<Vec<u8>, ErrorNum> {
+        Err(ErrorNum::EPERM)
+    }
+
+    fn as_socket<'a>(self: Arc<Self>) -> Result<Arc<dyn SocketFile + 'a>, ErrorNum> where Self: 'a {
+        Err(ErrorNum::EBADTYPE)
+    }
+
+    fn as_link<'a>(self: Arc<Self>) -> Result<Arc<dyn LinkFile + 'a>, ErrorNum> where Self: 'a {
+        Ok(self)
+    }
+
+    fn as_regular<'a>(self: Arc<Self>) -> Result<Arc<dyn RegularFile + 'a>, ErrorNum> where Self: 'a {
+        Err(ErrorNum::EBADTYPE)
+    }
+
+    fn as_block<'a>(self: Arc<Self>) -> Result<Arc<dyn BlockFile + 'a>, ErrorNum> where Self: 'a {
+        Err(ErrorNum::EBADTYPE)
+    }
+
+    fn as_dir<'a>(self: Arc<Self>) -> Result<Arc<dyn DirFile + 'a>, ErrorNum> where Self: 'a {
+        Err(ErrorNum::EBADTYPE)
+    }
+
+    fn as_char<'a>(self: Arc<Self>) -> Result<Arc<dyn CharFile + 'a>, ErrorNum> where Self: 'a {
+        Err(ErrorNum::EBADTYPE)
+    }
+
+    fn as_fifo<'a>(self: Arc<Self>) -> Result<Arc<dyn FIFOFile + 'a>, ErrorNum> where Self: 'a {
+        Err(ErrorNum::EBADTYPE)
+    }
+
+    fn as_mount<'a>(self: Arc<Self>) -> Result<Arc<dyn MountPoint + 'a>, ErrorNum> where Self: 'a {
+        Err(ErrorNum::EBADTYPE)
+    }
+
+    fn as_file<'a>(self: Arc<Self>) -> Arc<dyn File + 'a> where Self: 'a {
+        self
+    }
+
+    fn as_any<'a>(self: Arc<Self>) -> Arc<dyn Any + Send + Sync + 'a> where Self: 'a {
+        self
+    }
+
+    fn vfs(&self) -> Arc<dyn VirtualFileSystem> {
+        self.vfs.clone()
+    }
+
+    fn stat(&self) -> Result<FileStat, ErrorNum> {
+        Ok(FileStat{
+            open_mode: OpenMode::READ,
+            file_size: 0,
+            path: self.self_path.clone(),
+            inode: 0,
+            fs: Arc::downgrade(&self.vfs),
+        })
+    }
+}
+
+impl LinkFile for DummyLink {
+    fn read_link(&self) -> Result<Path, ErrorNum> {
+        Ok(self.link_dest.clone())
+    }
+
+    fn write_link(&self, _path: &Path) -> Result<(), ErrorNum> {
+        Err(ErrorNum::EPERM)
+    }
+}

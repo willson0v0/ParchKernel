@@ -1,10 +1,10 @@
 use core::fmt::Debug;
 
-use alloc::{collections::{BTreeMap}, sync::Arc, string::String};
+use alloc::{collections::{BTreeMap}, sync::Arc};
 
-use crate::{fs::{VirtualFileSystem, fs_impl::{parch_fs::{INODE_SIZE, BLK_SIZE, PFS_MAGIC, INODE_BITMAP_SIZE, PFSDir, PFSBase}, PARCH_FS}, DirFile, OpenMode, Path, types::{Permission, FileType}, File}, utils::{SpinMutex, Mutex, ErrorNum}, mem::{BitMap, PhysAddr, alloc_fs_page, free_fs_page, PhysPageNum}, config::PAGE_SIZE};
+use crate::{fs::{VirtualFileSystem, fs_impl::{parch_fs::{INODE_SIZE, BLK_SIZE, PFS_MAGIC, INODE_BITMAP_SIZE, PFSDir, PFSBase}, PARCH_FS}, DirFile, OpenMode, Path}, utils::{SpinMutex, Mutex, ErrorNum, UUID}, mem::{BitMap, PhysAddr, alloc_fs_page, free_fs_page, PhysPageNum}, config::PAGE_SIZE};
 
-use super::{PFSINode, INodeNo, SuperBlock, BlockNo};
+use super::{PFSINode, INodeNo, SuperBlock, BlockNo, PFSDirInner};
 
 pub struct ParchFSInner {
     // lock inode, not locking file (user's task)
@@ -17,7 +17,8 @@ pub struct ParchFSInner {
 
 pub struct ParchFS{
     pub inner: SpinMutex<ParchFSInner>,
-    pub mount_path: Path
+    pub mount_path: Path,
+    pub uuid: UUID
 }
 
 impl Debug for ParchFS {
@@ -32,6 +33,7 @@ impl ParchFS {
         Self{
             inner: SpinMutex::new("PFS lock", ParchFSInner::new()),
             mount_path,
+            uuid: UUID::new()
         }
     }
 
@@ -77,34 +79,6 @@ impl ParchFS {
     pub fn free_blk(&self, block_no: BlockNo) {
         let mut inner = self.inner.acquire();
         inner.free_blk(block_no);
-    }
-    
-    pub fn make_file(&self, parent: Arc<dyn DirFile>, name: String, perm: Permission, f_type: FileType, open_mode: OpenMode) -> Result<Arc<dyn File>, ErrorNum> {
-        let mut inner = self.inner.acquire();
-        inner.make_file(parent, name, perm, f_type, open_mode)
-    }
-
-    pub fn root_dir(&self, open_mode: OpenMode) -> Arc<dyn DirFile> {
-        self.open(&Path::from("/"), open_mode).unwrap().as_dir().unwrap()
-    }
-
-    pub fn create_path(&self, path: &Path) -> Result<Arc<dyn DirFile>, ErrorNum> {
-        if path.is_root() {return Ok(self.root_dir(OpenMode::SYS));}
-        let mut dir = self.root_dir(OpenMode::SYS);
-        let mut path = path.clone();
-        while path.len() >= 1 {
-            let cur_name = path.components[0].clone();
-            let res = dir.make_file(cur_name.clone().into(), Permission::default(), FileType::DIR);
-            if res.is_err_with(|&x| x==ErrorNum::EEXIST) {
-                dir = dir.open_dir(&cur_name.into(), OpenMode::SYS)?.as_dir()?;
-            } else if let Ok(open_res) = res {
-                dir = open_res.as_dir()?;
-            } else {
-                return Err(res.err().unwrap())
-            }
-            path = path.strip_head();
-        }
-        Ok(dir)
     }
 }
 
@@ -172,66 +146,10 @@ impl ParchFSInner {
         assert!(self.inode_bitmap.get(inode_no), "Freeing free inode");
         self.inode_bitmap.clear(inode_no);
     }
-
-    pub fn make_file(&mut self, parent: Arc<dyn DirFile>, name: String, perm: Permission, f_type: FileType, open_mode: OpenMode) -> Result<Arc<dyn File>, ErrorNum> {
-        parent.make_file(name.clone(), perm, f_type)?;
-        parent.open_dir(&Path::from(name), open_mode)
-    }
 }
 
 impl VirtualFileSystem for ParchFS {
-    fn open(&self, path: &crate::fs::Path, mode: crate::fs::vfs::OpenMode) -> Result<alloc::sync::Arc<dyn crate::fs::File>, crate::utils::ErrorNum> {
-        if mode.contains(OpenMode::CREATE) {
-            self.mkfile(path)?;
-        }
-        if path.is_root() {
-            return Ok(Arc::new(
-                PFSDir(SpinMutex::new("PFS File lock", crate::fs::fs_impl::parch_fs::PFSDirInner { base: PFSBase {
-                    inode_no: self.inner.acquire().superblock.root_inode.into(),
-                    open_mode: mode,
-                    mmap_start: None,
-                    fs: Arc::downgrade(&PARCH_FS),
-                    path: Path::root(),
-                } })))
-            );
-        }
-        // Note: cannot use open "/" or root_dir() here
-        let root_dir = Arc::new(
-            PFSDir(SpinMutex::new("PFS File lock", crate::fs::fs_impl::parch_fs::PFSDirInner { base: PFSBase {
-                inode_no: self.inner.acquire().superblock.root_inode.into(),
-                open_mode: OpenMode::SYS,
-                mmap_start: None,
-                fs: Arc::downgrade(&PARCH_FS),
-                path: Path::root(),
-            } }))
-        );
-        root_dir.open_dir(path, mode)
-    }
-
-    fn mkdir(&self, path: &crate::fs::Path) -> Result<(), crate::utils::ErrorNum> {
-        if path.is_root() {return Err(ErrorNum::EEXIST);}
-        self.create_path(path)?;
-        Ok(())
-    }
-
-    fn mkfile(&self, path: &crate::fs::Path) -> Result<(), crate::utils::ErrorNum> {
-        if path.is_root() {return Err(ErrorNum::EEXIST);}
-        let dir = self.create_path(&path.strip_tail())?;
-        dir.make_file(path.last(), Permission::default(), FileType::REGULAR)?;
-        Ok(())
-    }
-
-    fn remove(&self, path: &crate::fs::Path) -> Result<(), crate::utils::ErrorNum> {
-        if path.is_root() {return Err(ErrorNum::EPERM);}
-        let dir = self.open(&path.strip_tail(), OpenMode::SYS)?.as_dir()?;
-        dir.remove_file(path.last())
-    }
-
     fn link(&self, _dest: alloc::sync::Arc<dyn crate::fs::File>, _link_file: &crate::fs::Path) -> Result<alloc::sync::Arc<dyn crate::fs::File>, crate::utils::ErrorNum> {
-        todo!()
-    }
-
-    fn sym_link(&self, _abs_src: &crate::fs::Path, _rel_dst: &crate::fs::Path) -> Result<alloc::sync::Arc<dyn crate::fs::LinkFile>, crate::utils::ErrorNum> {
         todo!()
     }
 
@@ -240,6 +158,26 @@ impl VirtualFileSystem for ParchFS {
     }
 
     fn as_vfs<'a>(self: Arc<Self>) -> Arc<dyn VirtualFileSystem + 'a> where Self: 'a {
+        self
+    }
+
+    fn get_uuid(&self) -> crate::utils::UUID {
+        self.uuid
+    }
+
+    fn root_dir(&self, open_mode: OpenMode) -> Result<Arc<dyn DirFile>, ErrorNum> {
+        Ok(Arc::new(PFSDir(SpinMutex::new("PFSFile", PFSDirInner{
+            base: PFSBase { 
+                inode_no: self.inner.acquire().superblock.root_inode.into(), 
+                open_mode, 
+                mmap_start: None, 
+                fs: Arc::downgrade(&PARCH_FS.clone()), 
+                path: "/".into() 
+            }
+        }))))
+    }
+
+    fn as_any<'a>(self: Arc<Self>) -> Arc<dyn core::any::Any + Send + Sync> {
         self
     }
 }
