@@ -1,6 +1,6 @@
 use core::sync::atomic::{Ordering, AtomicUsize};
 
-use alloc::{collections::{VecDeque}, sync::Arc};
+use alloc::{collections::{VecDeque}, sync::Arc, vec::Vec};
 use lazy_static::*;
 
 use crate::{utils::{SpinMutex, MutexGuard, Mutex, ErrorNum}, config::MAX_CPUS};
@@ -58,7 +58,7 @@ impl ProcessManagerInner {
         self.running_list[get_hart_id()].take().expect("No process is running.");
     }
 
-    pub fn get_process(&mut self, pid: ProcessID) -> Result<Arc<ProcessControlBlock>, ErrorNum> {
+    pub fn get_process(&self, pid: ProcessID) -> Result<Arc<ProcessControlBlock>, ErrorNum> {
         for proc in self.process_list.iter() {
             if proc.pid == pid {
                 return Ok(proc.clone());
@@ -72,6 +72,16 @@ impl ProcessManagerInner {
             }
         }
         Err(ErrorNum::ESRCH)
+    }
+
+    pub fn enumerate_process(&self) -> Vec<Arc<ProcessControlBlock>> {
+        let mut res: Vec<Arc<ProcessControlBlock>> = self.process_list.clone().into();
+        for p in self.running_list.iter() {
+            if let Some(v) = p.clone() {
+                res.push(v)
+            }
+        }
+        res
     }
 }
 
@@ -91,8 +101,18 @@ pub fn get_process(pid: ProcessID) -> Result<Arc<ProcessControlBlock>, ErrorNum>
     PROCESS_MANAGER.inner_locked().get_process(pid)
 }
 
+pub fn process_list() -> Vec<Arc<ProcessControlBlock>> {
+    PROCESS_MANAGER.inner_locked().enumerate_process()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ProcessID(pub usize);
+
+impl From<usize> for ProcessID {
+    fn from(pid: usize) -> Self {
+        Self (pid)
+    }
+}
 
 
 impl core::fmt::Display for ProcessID {

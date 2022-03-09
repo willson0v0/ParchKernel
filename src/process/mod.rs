@@ -18,6 +18,7 @@ pub use manager::{
     ProcessID,
     new_pid,
     get_process,
+    process_list,
     free_current
 };
 

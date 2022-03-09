@@ -2,7 +2,7 @@ mod manager;
 mod types;
 mod fs_impl;
 mod vfs;
-// mod mount_point;
+mod pipes;
 
 // pub use mount_point::MountPoint;
 
@@ -32,6 +32,12 @@ pub use vfs::{
     OpenMode
 };
 
+pub use pipes::{
+    PipeReadEnd,
+    PipeWriteEnd,
+    new_pipe
+};
+
 use lazy_static::*;
 
 use crate::utils::{RWLock, ErrorNum};
@@ -53,4 +59,6 @@ pub fn open_at(file: Arc<dyn File>, rel_path: &Path, mode: OpenMode) -> Result<A
 pub fn init() {
     MOUNT_MANAGER.inner.acquire_r().make_file(&"/dev".into(), Permission::from_bits_truncate(0o544), types::FileType::DIR).expect("Failed to create dev fs mount point.");
     MOUNT_MANAGER.inner.acquire_w().mount("/dev".into(), fs_impl::DEV_FS.clone()).expect("Failed to mount dev fs.");
+    MOUNT_MANAGER.inner.acquire_r().make_file(&"/proc".into(), Permission::from_bits_truncate(0o544), types::FileType::DIR).expect("Failed to create proc fs mount point.");
+    MOUNT_MANAGER.inner.acquire_w().mount("/proc".into(), fs_impl::PROC_FS.clone()).expect("Failed to mount proc fs.");
 }

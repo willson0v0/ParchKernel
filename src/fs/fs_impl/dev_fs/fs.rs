@@ -128,12 +128,16 @@ impl DirFile for DevFolder {
         if entry_name == "pts" {
             Ok(Arc::new(UartPTS{mode}))
         } else if entry_name == "." {
-            Ok(DEV_FOLDER.clone())
+            Ok(Arc::new(DummyLink{
+                vfs: DEV_FS.clone(),
+                link_dest: "/dev".into(),
+                self_path: "/dev/.".into(),
+            }))
         } else if entry_name == ".." {
             Ok(Arc::new(DummyLink{
                 vfs: DEV_FS.clone(),
-                link_dest: DEV_FS.mount_path().strip_tail(),
-                self_path: DEV_FS.mount_path(),
+                link_dest: "/".into(),
+                self_path: "/dev/..".into(),
             }))
         } else {
             Err(ErrorNum::ENOENT)
@@ -150,8 +154,8 @@ impl DirFile for DevFolder {
 
     fn read_dirent(&self) -> Result<alloc::vec::Vec<crate::fs::Dirent>, ErrorNum> {
         Ok(vec![
-            Dirent{ inode: 0, permission: Permission::default(), f_type: crate::fs::types::FileType::DIR, f_name: ".".to_string() },
-            Dirent{ inode: 0, permission: Permission::default(), f_type: crate::fs::types::FileType::DIR, f_name: "..".to_string() },
+            Dirent{ inode: 0, permission: Permission::default(), f_type: crate::fs::types::FileType::LINK, f_name: ".".to_string() },
+            Dirent{ inode: 0, permission: Permission::default(), f_type: crate::fs::types::FileType::LINK, f_name: "..".to_string() },
             Dirent{ inode: 0, permission: Permission::default(), f_type: crate::fs::types::FileType::CHAR, f_name: "pts".to_string() },
         ])
     }

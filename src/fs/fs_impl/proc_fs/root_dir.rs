@@ -1,8 +1,14 @@
-use alloc::sync::Arc;
+use alloc::{sync::Arc, vec::Vec, string::ToString};
 
-use crate::{fs::{File, DirFile, types::FileStat, OpenMode, VirtualFileSystem, fs_impl::proc_fs::{fd_dir::FDDir, proc_dir::{PidProcDir, ProcDir}}, open, Path}, utils::ErrorNum};
+use crate::{fs::{File, DirFile, types::{FileStat, Permission}, OpenMode, VirtualFileSystem, fs_impl::proc_fs::{fd_dir::FDDir, proc_dir::{PidProcDir, SelfProcDir}}, open, Path, Dirent, DummyLink}, utils::ErrorNum, process::{ProcessID, get_process, process_list}};
 
-use super::{PROC_FS, proc_dotlink::ProcDotDir};
+use super::{PROC_FS};
+
+use lazy_static::*;
+
+lazy_static!{
+    pub static ref ROOT_DIR: Arc<RootDir> = Arc::new(RootDir{});
+}
 
 #[derive(Debug)]
 pub struct RootDir;
@@ -44,14 +50,22 @@ impl File for RootDir {
         Err(ErrorNum::EBADTYPE)
     }
 
+    fn as_mount<'a>(self: Arc<Self>) -> Result<Arc<dyn crate::fs::MountPoint + 'a>, ErrorNum> where Self: 'a {
+        Err(ErrorNum::EBADTYPE)
+    }
+
     fn as_file<'a>(self: alloc::sync::Arc<Self>) -> alloc::sync::Arc<dyn File + 'a> where Self: 'a {
+        self
+    }
+    
+    fn as_any<'a>(self: Arc<Self>) -> Arc<dyn core::any::Any + Send + Sync + 'a> where Self: 'a {
         self
     }
 
     fn vfs(&self) -> alloc::sync::Arc<dyn crate::fs::VirtualFileSystem> {
         PROC_FS.clone()
     }
-    
+
     fn stat(&self) -> Result<crate::fs::types::FileStat, crate::utils::ErrorNum> {
         Ok(FileStat{
             open_mode: OpenMode::READ,
@@ -64,15 +78,25 @@ impl File for RootDir {
 }
 
 impl DirFile for RootDir {
-    fn open_dir(&self, rel_path: &crate::fs::Path, mode: crate::fs::OpenMode) -> Result<alloc::sync::Arc<dyn File>, crate::utils::ErrorNum> {
-        if rel_path.starts_with(&"proc".into()) {
-            ProcDir{}.open_dir(&rel_path.strip_head(), mode)
-        } else if rel_path.starts_with(&"..".into())  {
-            Ok(Arc::new(ProcDotDir::new("proc/..".into(), rel_path.strip_head())))
-        } else if rel_path.starts_with(&".".into()) {
-            Ok(Arc::new(ProcDotDir::new("proc/.".into(), Path::new("/proc").unwrap().concat(&rel_path.strip_head()))))
+    fn open_entry(&self, entry_name: &alloc::string::String, mode: OpenMode) -> Result<Arc<dyn File>, ErrorNum> {
+        if entry_name == "self" {
+            Ok(Arc::new(SelfProcDir{}))
+        } else if entry_name == ".." {
+            Ok(Arc::new(DummyLink{
+                vfs: PROC_FS.clone(),
+                link_dest: "/".into(),
+                self_path: "/proc/..".into(),
+            }))
+        } else if entry_name == "." {
+            Ok(Arc::new(DummyLink{
+                vfs: PROC_FS.clone(),
+                link_dest: "/proc".into(),
+                self_path: "/proc/.".into(),
+            }))
         } else {
-            Err(ErrorNum::ENOENT)
+            let pid: ProcessID = entry_name.parse::<usize>().map_err(|_| ErrorNum::ENOENT)?.into();
+            let _proc = get_process(pid)?;  // make sure there is such process.
+            Ok(Arc::new(PidProcDir { pid }))
         }
     }
 
@@ -85,6 +109,40 @@ impl DirFile for RootDir {
     }
 
     fn read_dirent(&self) -> Result<alloc::vec::Vec<crate::fs::Dirent>, crate::utils::ErrorNum> {
-        todo!()
+        let mut result = Vec::new();
+
+        result.push(Dirent {
+            inode: 0,
+            permission: Permission::from_bits_truncate(0o440),
+            f_type: crate::fs::types::FileType::LINK,
+            f_name: ".".to_string(),
+        });
+
+        result.push(Dirent {
+            inode: 0,
+            permission: Permission::from_bits_truncate(0o440),
+            f_type: crate::fs::types::FileType::LINK,
+            f_name: "..".to_string(),
+        });
+
+        let process_list = process_list();
+        for pcb in process_list {
+            let dentry = Dirent {
+                inode: 0,
+                permission: Permission::from_bits_truncate(0o440),
+                f_type: crate::fs::types::FileType::DIR,
+                f_name: format!("{}", pcb.pid.0),
+            };
+            result.push(dentry);
+        }
+        Ok(result)
+    }
+
+    fn register_mount(&self, dentry_name: alloc::string::String, uuid: crate::utils::UUID) -> Result<(), ErrorNum> {
+        Err(ErrorNum::EPERM)
+    }
+
+    fn register_umount(&self, dentry_name: alloc::string::String) -> Result<crate::utils::UUID, ErrorNum> {
+        Err(ErrorNum::EPERM)
     }
 }

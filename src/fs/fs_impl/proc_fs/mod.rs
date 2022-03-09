@@ -1,50 +1,44 @@
-use crate::fs::VirtualFileSystem;
+use crate::{fs::VirtualFileSystem, utils::{ErrorNum, UUID}};
 
-mod pipes;
 mod proc_dir;
 mod root_dir;
 mod fd_dir;
-mod proc_dotlink;
 
 use lazy_static::*;
 
+use self::root_dir::ROOT_DIR;
+
 lazy_static!{
-    pub static ref PROC_FS: alloc::sync::Arc<ProcFS> = alloc::sync::Arc::new(ProcFS{});
+    pub static ref PROC_FS: alloc::sync::Arc<ProcFS> = alloc::sync::Arc::new(ProcFS{uuid: UUID::new()});
 }
 
 #[derive(Debug)]
-pub struct ProcFS {}
+pub struct ProcFS {
+    pub uuid: UUID
+}
 
 impl VirtualFileSystem for ProcFS {
-    fn open(&self, path: &crate::fs::Path, mode: crate::fs::OpenMode) -> Result<alloc::sync::Arc<dyn crate::fs::File>, crate::utils::ErrorNum> {
-        todo!()
-    }
-
-    fn mkdir(&self, path: &crate::fs::Path) -> Result<(), crate::utils::ErrorNum> {
-        todo!()
-    }
-
-    fn mkfile(&self, path: &crate::fs::Path) -> Result<(), crate::utils::ErrorNum> {
-        todo!()
-    }
-
-    fn remove(&self, path: &crate::fs::Path) -> Result<(), crate::utils::ErrorNum> {
-        todo!()
-    }
-
     fn link(&self, dest: alloc::sync::Arc<dyn crate::fs::File>, link_file: &crate::fs::Path) -> Result<alloc::sync::Arc<dyn crate::fs::File>, crate::utils::ErrorNum> {
-        todo!()
-    }
-
-    fn sym_link(&self, abs_src: &crate::fs::Path, rel_dst: &crate::fs::Path) -> Result<alloc::sync::Arc<dyn crate::fs::LinkFile>, crate::utils::ErrorNum> {
-        todo!()
+        Err(ErrorNum::EROFS)
     }
 
     fn mount_path(&self) -> crate::fs::Path {
-        todo!()
+        "/proc".into()
     }
 
     fn as_vfs<'a>(self: alloc::sync::Arc<Self>) -> alloc::sync::Arc<dyn VirtualFileSystem + 'a> where Self: 'a {
-        todo!()
+        self
+    }
+
+    fn get_uuid(&self) -> crate::utils::UUID {
+        self.uuid
+    }
+
+    fn root_dir(&self, mode: crate::fs::OpenMode) -> Result<alloc::sync::Arc<dyn crate::fs::DirFile>, crate::utils::ErrorNum> {
+        Ok(ROOT_DIR.clone())
+    }
+
+    fn as_any<'a>(self: alloc::sync::Arc<Self>) -> alloc::sync::Arc<dyn core::any::Any + Send + Sync> {
+        self
     }
 }

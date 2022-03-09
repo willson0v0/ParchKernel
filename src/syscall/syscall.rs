@@ -2,31 +2,32 @@ use core::{mem::size_of};
 
 use alloc::{vec::Vec, sync::Arc, collections::LinkedList, borrow::ToOwned, string::String};
 
-use crate::{process::{FileDescriptor, get_processor, push_sum_on, pop_sum_on, enqueue, ProcessStatus, ProcessID, get_process, SignalNum, free_current}, mem::{VirtAddr, VMASegment, SegmentFlags, ManagedSegment, VPNRange}, utils::{ErrorNum}, fs::{Path, open, OpenMode, open_at}, interrupt::trap_context::TrapContext};
+use crate::{process::{FileDescriptor, get_processor, push_sum_on, pop_sum_on, enqueue, ProcessStatus, ProcessID, get_process, SignalNum, free_current}, mem::{VirtAddr, VMASegment, SegmentFlags, ManagedSegment, VPNRange}, utils::{ErrorNum}, fs::{Path, open, OpenMode, open_at, new_pipe}, interrupt::trap_context::TrapContext};
 
 use super::{syscall_num::*, types::{MMAPProt, MMAPFlag, SyscallDirent}};
 
 pub fn syscall(syscall_id: usize, args: [usize; 6]) -> Result<usize, ErrorNum> {
     let do_trace = get_processor().current().unwrap().get_inner().trace_enabled[syscall_id];
     match syscall_id {
-        SYSCALL_WRITE       => CALL_SYSCALL!(do_trace, sys_write      , FileDescriptor::from(args[0]), VirtAddr::from(args[1]), args[2]),
-        SYSCALL_READ        => CALL_SYSCALL!(do_trace, sys_read       , FileDescriptor::from(args[0]), VirtAddr::from(args[1]), args[2]),
-        SYSCALL_OPEN        => CALL_SYSCALL!(do_trace, sys_open       , VirtAddr::from(args[0]), args[1]),
-        SYSCALL_OPENAT      => CALL_SYSCALL!(do_trace, sys_openat     , FileDescriptor::from(args[0]), VirtAddr::from(args[1]), args[2]),
-        SYSCALL_CLOSE       => CALL_SYSCALL!(do_trace, sys_close      , FileDescriptor::from(args[0])),
-        SYSCALL_DUP         => CALL_SYSCALL!(do_trace, sys_dup        , FileDescriptor::from(args[0])),
-        SYSCALL_FORK        => CALL_SYSCALL!(do_trace, sys_fork       ),
-        SYSCALL_EXEC        => CALL_SYSCALL!(do_trace, sys_exec       , VirtAddr::from(args[0]), VirtAddr::from(args[1])),
-        SYSCALL_EXIT        => CALL_SYSCALL!(do_trace, sys_exit       , args[0] as isize),
-        SYSCALL_MMAP        => CALL_SYSCALL!(do_trace, sys_mmap       , VirtAddr::from(args[0]), args[1], MMAPProt::from_bits(args[2]).ok_or(ErrorNum::EINVAL)?, MMAPFlag::from_bits(args[3]).ok_or(ErrorNum::EINVAL)?, FileDescriptor::from(args[4]), args[5]),
-        SYSCALL_WAITPID     => CALL_SYSCALL!(do_trace, sys_waitpid    , args[0] as isize, VirtAddr::from(args[1])),
-        SYSCALL_SIGNAL      => CALL_SYSCALL!(do_trace, sys_signal     , ProcessID(args[0]), args[1]),
-        SYSCALL_SIGACTION   => CALL_SYSCALL!(do_trace, sys_sigaction  , args[0], VirtAddr::from(args[1])),
-        SYSCALL_SIGRETURN   => CALL_SYSCALL!(do_trace, sys_sigreturn  ),
-        SYSCALL_GETCWD      => CALL_SYSCALL!(do_trace, sys_getcwd     , VirtAddr::from(args[0]), args[1]),
-        SYSCALL_CHDIR       => CALL_SYSCALL!(do_trace, sys_chdir      , VirtAddr::from(args[0])),
-        SYSCALL_SBRK        => CALL_SYSCALL!(do_trace, sys_sbrk       , args[0] as isize),
-        SYSCALL_GETDENTS    => CALL_SYSCALL!(do_trace, sys_getdents   , FileDescriptor::from(args[0]), VirtAddr::from(args[1]), args[2]),
+        SYSCALL_WRITE       => CALL_SYSCALL!(do_trace, sys_write        , FileDescriptor::from(args[0]), VirtAddr::from(args[1]), args[2]),
+        SYSCALL_READ        => CALL_SYSCALL!(do_trace, sys_read         , FileDescriptor::from(args[0]), VirtAddr::from(args[1]), args[2]),
+        SYSCALL_OPEN        => CALL_SYSCALL!(do_trace, sys_open         , VirtAddr::from(args[0]), args[1]),
+        SYSCALL_OPENAT      => CALL_SYSCALL!(do_trace, sys_openat       , FileDescriptor::from(args[0]), VirtAddr::from(args[1]), args[2]),
+        SYSCALL_CLOSE       => CALL_SYSCALL!(do_trace, sys_close        , FileDescriptor::from(args[0])),
+        SYSCALL_DUP         => CALL_SYSCALL!(do_trace, sys_dup          , FileDescriptor::from(args[0])),
+        SYSCALL_FORK        => CALL_SYSCALL!(do_trace, sys_fork         ),
+        SYSCALL_EXEC        => CALL_SYSCALL!(do_trace, sys_exec         , VirtAddr::from(args[0]), VirtAddr::from(args[1])),
+        SYSCALL_EXIT        => CALL_SYSCALL!(do_trace, sys_exit         , args[0] as isize),
+        SYSCALL_MMAP        => CALL_SYSCALL!(do_trace, sys_mmap         , VirtAddr::from(args[0]), args[1], MMAPProt::from_bits(args[2]).ok_or(ErrorNum::EINVAL)?, MMAPFlag::from_bits(args[3]).ok_or(ErrorNum::EINVAL)?, FileDescriptor::from(args[4]), args[5]),
+        SYSCALL_WAITPID     => CALL_SYSCALL!(do_trace, sys_waitpid      , args[0] as isize, VirtAddr::from(args[1])),
+        SYSCALL_SIGNAL      => CALL_SYSCALL!(do_trace, sys_signal       , ProcessID(args[0]), args[1]),
+        SYSCALL_SIGACTION   => CALL_SYSCALL!(do_trace, sys_sigaction    , args[0], VirtAddr::from(args[1])),
+        SYSCALL_SIGRETURN   => CALL_SYSCALL!(do_trace, sys_sigreturn    ),
+        SYSCALL_GETCWD      => CALL_SYSCALL!(do_trace, sys_getcwd       , VirtAddr::from(args[0]), args[1]),
+        SYSCALL_CHDIR       => CALL_SYSCALL!(do_trace, sys_chdir        , VirtAddr::from(args[0])),
+        SYSCALL_SBRK        => CALL_SYSCALL!(do_trace, sys_sbrk         , args[0] as isize),
+        SYSCALL_GETDENTS    => CALL_SYSCALL!(do_trace, sys_getdents     , FileDescriptor::from(args[0]), VirtAddr::from(args[1]), args[2]),
+        SYSCALL_PIPE        => CALL_SYSCALL!(do_trace, sys_pipe         , VirtAddr::from(args[0])),
         _ => CALL_SYSCALL!(true, sys_unknown, syscall_id)
     }
 }
@@ -370,6 +371,22 @@ pub fn sys_getdents(fd: FileDescriptor, buf: VirtAddr, count: usize) -> Result<u
     }
     pop_sum_on();
     Ok(written)
+}
+
+pub fn sys_pipe(ret: VirtAddr) -> Result<usize, ErrorNum> {
+    let proc = get_processor().current().unwrap();
+    let mut proc_inner = proc.get_inner();
+    
+    let (r, w) = new_pipe();
+    let r_fd = proc_inner.register_file(r)?;
+    let w_fd = proc_inner.register_file(w)?;
+
+    let result = [r_fd, w_fd];
+    push_sum_on();
+    unsafe {ret.write_volatile(&result);}
+    pop_sum_on();
+
+    Ok(0)
 }
 
 pub fn sys_unknown(syscall_id:usize) -> Result<usize, ErrorNum> {

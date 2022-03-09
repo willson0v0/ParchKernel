@@ -40,6 +40,7 @@ impl Ord for ProcessControlBlock {
     }
 }
 
+#[repr(C)]
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 pub struct FileDescriptor(pub usize);
 

@@ -36,4 +36,5 @@ pub const MAX_SYSCALL       : usize = 64;
 
 pub const MAX_LINK_RECURSE  : usize = 32;
 
-pub const UUID_LENGTH: usize = 16;  // 16 bytes
+pub const UUID_LENGTH       : usize = 16;  // 16 bytes
+pub const PIPE_BUFFER_MAX   : usize = 4096;
