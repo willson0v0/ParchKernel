@@ -1,6 +1,6 @@
 use alloc::{sync::Arc, borrow::ToOwned, vec::Vec, string::ToString};
 
-use crate::{fs::{File, DirFile, LinkFile, types::{FileStat, Permission}, OpenMode, Path, VirtualFileSystem, Dirent}, process::{ProcessID, get_process, get_processor}, utils::ErrorNum};
+use crate::{fs::{File, DirFile, LinkFile, types::{FileStat, Permission}, OpenMode, Path, VirtualFileSystem, Dirent, DummyLink}, process::{ProcessID, get_process, get_processor}, utils::ErrorNum};
 
 use super::{PROC_FS, fd_dir::FDDir};
 
@@ -193,15 +193,37 @@ impl DirFile for PidProcDir {
     }
 
     fn open_entry(&self, entry_name: &alloc::string::String, mode: OpenMode) -> Result<Arc<dyn File>, ErrorNum> {
-        todo!()
+        if entry_name == "self" {
+            Ok(Arc::new(SelfProcDir{}))
+        } else if entry_name == ".." {
+            Ok(Arc::new(DummyLink{
+                vfs: PROC_FS.clone(),
+                link_dest: "/proc".into(),
+                self_path: format!("/proc/{}/..", self.pid).into(),
+            }))
+        } else if entry_name == "." {
+            Ok(Arc::new(DummyLink{
+                vfs: PROC_FS.clone(),
+                link_dest: format!("/proc/{}", self.pid).into(),
+                self_path: format!("/proc/{}/.", self.pid).into(),
+            }))
+        } else if entry_name == "fd" {
+            Ok(Arc::new(
+                FDDir{
+                    pid: self.pid,
+                }
+            ))
+        } else {
+            Err(ErrorNum::ENOENT)
+        }
     }
 
     fn register_mount(&self, dentry_name: alloc::string::String, uuid: crate::utils::UUID) -> Result<(), ErrorNum> {
-        todo!()
+        Err(ErrorNum::EPERM)
     }
 
     fn register_umount(&self, dentry_name: alloc::string::String) -> Result<crate::utils::UUID, ErrorNum> {
-        todo!()
+        Err(ErrorNum::EPERM)
     }
 }
 

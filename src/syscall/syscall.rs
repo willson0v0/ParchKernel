@@ -358,7 +358,11 @@ pub fn sys_getdents(fd: FileDescriptor, buf: VirtAddr, count: usize) -> Result<u
     let proc = get_processor().current().unwrap();
     let proc_inner = proc.get_inner();
     let dir_file = proc_inner.get_file(fd)?.as_dir()?;
+
+    // avoid procfs deadlock
+    drop(proc_inner);
     let dirents = dir_file.read_dirent()?;
+    
     let mut written = 0;
     push_sum_on();
     for (idx, dirent)in dirents.iter().enumerate() {

@@ -125,6 +125,13 @@ impl DirFile for RootDir {
             f_name: "..".to_string(),
         });
 
+        result.push(Dirent {
+            inode: 0,
+            permission: Permission::from_bits_truncate(0o440),
+            f_type: crate::fs::types::FileType::LINK,
+            f_name: "self".to_string(),
+        });
+
         let process_list = process_list();
         for pcb in process_list {
             let dentry = Dirent {
