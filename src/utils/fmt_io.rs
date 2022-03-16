@@ -132,7 +132,7 @@ pub fn do_log(log_level: LogLevel, args: fmt::Arguments) {
     // print_no_lock(args);
     // print_no_lock!("\x1b[{};{}m\r\n", FG_DEFAULT, BG_DEFAULT)
     print_no_lock!(
-        "\x1b[{};{}m[ {:>8.5} ] h {} p {} {:<10}: ", 
+        "\x1b[{};{}m[ {:>8.5} ] h {} p {:3} {:<10}: ", 
         LOG_FG_COLOURS[log_level.to_num()], 
         LOG_BG_COLOURS[log_level.to_num()], 
         get_time_second(),

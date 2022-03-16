@@ -2,7 +2,7 @@ use core::{arch::asm};
 
 use alloc::{vec::Vec, sync::Arc, borrow::ToOwned, string::String};
 use riscv::register::{satp};
-use crate::{utils::{ErrorNum}, config::{PHYS_END_ADDR, MMIO_RANGES, PAGE_SIZE, PROC_K_STACK_ADDR, TRAMPOLINE_ADDR, U_TRAMPOLINE_ADDR, TRAP_CONTEXT_ADDR, PROC_U_STACK_ADDR}, mem::{TrampolineSegment, UTrampolineSegment, TrapContextSegment, IdenticalMappingSegment, segment::SegmentFlags, VirtAddr, types::VPNRange, ManagedSegment, stat_mem}, fs::RegularFile, process::{get_processor, get_hart_id}};
+use crate::{utils::{ErrorNum}, config::{PHYS_END_ADDR, MMIO_RANGES, PAGE_SIZE, PROC_K_STACK_ADDR, TRAMPOLINE_ADDR, U_TRAMPOLINE_ADDR, TRAP_CONTEXT_ADDR, PROC_U_STACK_ADDR}, mem::{TrampolineSegment, UTrampolineSegment, TrapContextSegment, IdenticalMappingSegment, segment::SegmentFlags, VirtAddr, types::VPNRange, ManagedSegment, stat_mem, VMASegment}, fs::RegularFile, process::{get_processor, get_hart_id}};
 use super::{PageTable, VirtPageNum, ProcKStackSegment, segment::ProcUStackSegment, ArcSegment};
 
 use crate::utils::elf_rs_wrapper::read_elf;
@@ -115,7 +115,7 @@ impl MemLayout {
         // XXX: do_map here, or later?
         verbose!("Mapping all segment into pagetable...");
         layout.do_map();
-        debug!("Current vm mem usage: {:?}", stat_mem());
+        // debug!("Current vm mem usage: {:?}", stat_mem());
         layout
     }
 
@@ -173,7 +173,7 @@ impl MemLayout {
 
     pub fn map_proc_stack(&mut self) {
         self.register_segment(ProcKStackSegment::new());
-        self.register_segment(ProcUStackSegment::new(None));
+        self.register_segment(ProcUStackSegment::new());
         self.do_map();
     }
 
@@ -210,7 +210,7 @@ impl MemLayout {
 
     // length in byte
     pub fn get_space(&self, length: usize) -> Result<VirtPageNum, ErrorNum> {
-        let vpn_top = VirtPageNum::from(VirtAddr::from(PROC_K_STACK_ADDR - PAGE_SIZE));
+        let vpn_top = VirtPageNum::from(VirtAddr::from(PROC_U_STACK_ADDR - PAGE_SIZE));
         let vpn_bottom = VirtPageNum::from(VirtAddr::from(PHYS_END_ADDR.0));
         let page_count = (length / PAGE_SIZE) + 2; // guard page
         for vpn_s in VPNRange::new(vpn_top - page_count, vpn_bottom) {
@@ -251,9 +251,8 @@ impl MemLayout {
     }
 
     pub fn remove_segment_by_vpn(&mut self, vpn: VirtPageNum) -> Result<(), ErrorNum> {
-        self.unmap_segment_by_vpn(vpn)?;
-        self.segments.retain(|x| !x.contains(vpn));
-        Ok(())
+        let seg = self.get_segment(vpn)?;
+        self.remove_segment(seg)
     }
 
     pub fn remove_segment(&mut self, seg: ArcSegment) -> Result<(), ErrorNum> {
@@ -269,9 +268,15 @@ impl MemLayout {
     pub fn map_elf(&mut self, elf_file: Arc<dyn RegularFile>) -> Result<(VirtAddr, VirtAddr), ErrorNum> {
         verbose!("Mapping elf into memory space");
         // first map it for easy reading...
-        let first_map = elf_file.clone().register_mmap(self, 0, elf_file.stat()?.file_size)?;
-        self.do_map();
         let stat = elf_file.stat()?;
+        let first_map = if get_processor().current().is_none() {
+            get_processor().map_file(elf_file.clone())
+        } else {
+            let res = elf_file.clone().register_mmap(self, 0, elf_file.stat()?.file_size)?;
+            self.do_map();
+            res
+        };
+        verbose!("init map start {:?} len {:?}", first_map, stat.file_size);
 
         // some dirty trick for zero copy
         let start_va: VirtAddr = first_map.into();
@@ -293,7 +298,7 @@ impl MemLayout {
             }
         }
 
-        for (_idx, p) in elf.program_header_iter().enumerate() {
+        for p in elf.program_header_iter() {
             verbose!("Handling PH {:x?}", p);
             if p.ph_type() == ProgramType::LOAD {
                 let seg_start: VirtAddr = (p.vaddr() as usize).into();
@@ -313,10 +318,12 @@ impl MemLayout {
                 if p.flags().contains(ProgramHeaderFlags::WRITE) {
                     seg_flag = seg_flag | SegmentFlags::W;
                 }
+
+                // TODO: new segment type with lazy program loading
+
                 let segment = ManagedSegment::new(
                     VPNRange::new(seg_start, seg_end), 
                     SegmentFlags::W | SegmentFlags::R, 
-                    None,
                     p.memsz() as usize
                 );
                 self.register_segment(segment.clone());
@@ -327,15 +334,28 @@ impl MemLayout {
                 let len = p.filesz() as usize;
                 unsafe{core::ptr::copy_nonoverlapping(src, dst, len)}
                 segment.as_managed()?.alter_permission(seg_flag, &mut self.pagetable);
+                
+                // let segment = VMASegment::new_at(
+                //     seg_start, 
+                //     elf_file.clone(), 
+                //     seg_flag, 
+                //     p.offset() as usize, 
+                //     p.memsz() as usize
+                // ).unwrap();
+                // self.register_segment(segment);
             }
         }
         let entry_point = elf.entry_point() as usize;
         // free the first mmap...
-        self.remove_segment_by_vpn(first_map)?;
+        if get_processor().current().is_none() {
+            get_processor().unmap_file(first_map);
+        } else {
+            self.remove_segment_by_vpn(first_map).unwrap();
+        }
         Ok((entry_point.into(), data_end.into()))
     }
 
-    pub fn fork(&self) -> Result<Self, ErrorNum> {
+    pub fn fork(&mut self) -> Result<Self, ErrorNum> {
         debug!("Forking memlayout @ {:?}", self.pagetable.root_ppn);
         let mut layout = Self {
             pagetable: PageTable::new(),
@@ -344,7 +364,7 @@ impl MemLayout {
         debug!("New memlayout @ {:?}", layout.pagetable.root_ppn);
 
         for seg in self.segments.iter() {
-            layout.register_segment(seg.clone_seg()?);
+            layout.register_segment(seg.clone_seg(&mut self.pagetable)?);
         }
         layout.do_map();
         Ok(layout)
@@ -352,10 +372,11 @@ impl MemLayout {
 
     pub fn do_lazy(&mut self, vpn: VirtPageNum) -> Result<(), ErrorNum> {
         for seg in self.segments.iter() {
-            if seg.do_lazy(vpn, &mut self.pagetable).is_ok() {
-                return Ok(());
+            if seg.contains(vpn) {
+                return seg.do_lazy(vpn, &mut self.pagetable);
             }
         }
+        error!("Cannot find lazy entry for {:?}", vpn);
         Err(ErrorNum::ENOSEG)
     }
 }

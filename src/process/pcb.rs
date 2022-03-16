@@ -2,7 +2,7 @@ use core::{mem::size_of, cmp::Ordering};
 
 use alloc::{sync::{Arc, Weak}, collections::{BTreeMap, VecDeque, LinkedList}, vec::Vec};
 
-use crate::{mem::{MemLayout, VirtAddr, VirtPageNum}, utils::{SpinMutex, MutexGuard, Mutex, ErrorNum}, fs::{Path, open, OpenMode, RegularFile, File}, interrupt::trap_context::TrapContext, config::{TRAP_CONTEXT_ADDR, PROC_U_STACK_ADDR, PROC_U_STACK_SIZE, U_TRAMPOLINE_ADDR, MAX_FD, MAX_SYSCALL}, process::{def_handler::*, push_sum_on, pop_sum_on}, syscall::syscall_num::{SYSCALL_WRITE, SYSCALL_READ}};
+use crate::{mem::{MemLayout, VirtAddr, VirtPageNum}, utils::{SpinMutex, MutexGuard, Mutex, ErrorNum}, fs::{Path, open, OpenMode, RegularFile, File}, interrupt::trap_context::TrapContext, config::{TRAP_CONTEXT_ADDR, PROC_U_STACK_ADDR, PROC_U_STACK_SIZE, U_TRAMPOLINE_ADDR, MAX_FD, MAX_SYSCALL}, process::{def_handler::*, push_sum_on, pop_sum_on, get_processor}, syscall::syscall_num::{SYSCALL_WRITE, SYSCALL_READ}};
 
 use super::{ProcessID, new_pid, processor::ProcessContext, SignalNum};
 
@@ -230,7 +230,7 @@ impl PCBInner {
         (&mut self.proc_context) as *mut ProcessContext
     }
 
-    pub fn fork(&self, parent: Weak<ProcessControlBlock>) -> Result<Self, ErrorNum> {
+    pub fn fork(&mut self, parent: Weak<ProcessControlBlock>) -> Result<Self, ErrorNum> {
         Ok(Self {
             elf_file: self.elf_file.clone(),
             mem_layout: self.mem_layout.fork()?,
@@ -297,10 +297,10 @@ impl PCBInner {
     pub fn exec(&mut self, elf_file: Arc<dyn RegularFile>, args: Vec<Vec<u8>>) -> Result<(), ErrorNum> {
         assert!(self.status == ProcessStatus::Running, "Exec on process that is not running");
         self.mem_layout.reset()?;
+        self.elf_file = elf_file.clone();
         let (entry, data) = self.mem_layout.map_elf(elf_file.clone())?;
         self.mem_layout.do_map();
         verbose!("mem_layout done");
-        self.elf_file = elf_file.clone();
         self.entry_point = entry;
         self.data_end = data;
         // preserve file descriptor table
@@ -311,7 +311,8 @@ impl PCBInner {
         self.signal_enable = Self::defualt_mask();
         self.pending_signal.clear();
         
-        push_sum_on();
+        let processor_guard = get_processor();
+        processor_guard.push_sum_on();
         // copy args into user stack
         let mut ptr = PROC_U_STACK_ADDR + PROC_U_STACK_SIZE;
         let mut argv = Vec::new();
@@ -327,7 +328,7 @@ impl PCBInner {
             unsafe{ptr.write_volatile(arg_ptr)};
             ptr = ptr + size_of::<VirtAddr>();
         }
-        pop_sum_on();
+        processor_guard.pop_sum_on();
 
         let trap_context = TrapContext::current_ref();
         *trap_context = TrapContext::new();

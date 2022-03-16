@@ -46,3 +46,12 @@ impl From<Dirent> for SyscallDirent {
         res
     }
 }
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct SyscallStat {
+    pub persistant_usage: usize,
+    pub runtime_usage: usize,
+    pub kernel_usage: usize,
+    pub total_available: usize,
+}

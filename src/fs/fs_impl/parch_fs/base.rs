@@ -1,4 +1,4 @@
-use crate::{fs::{vfs::OpenMode, fs_impl::parch_fs::{BAD_BLOCK, BLOCKNO_PER_BLK, PFS_MAXCAP, PFSType}, Path, types::FileType, Cursor}, mem::{PageGuard, VirtPageNum, claim_fs_page, VirtAddr}, utils::{ErrorNum, Mutex, MutexGuard, time::get_real_time_epoch, UUID}};
+use crate::{fs::{vfs::OpenMode, fs_impl::parch_fs::{BAD_BLOCK, BLOCKNO_PER_BLK, PFS_MAXCAP, PFSType}, Path, types::FileType, Cursor}, mem::{PageGuard, VirtPageNum, claim_fs_page, VirtAddr, alloc_vm_page, PhysPageNum, PhysAddr}, utils::{ErrorNum, Mutex, MutexGuard, time::get_real_time_epoch, UUID}};
 use super::{DIRECT_BLK_COUNT, BLK_SIZE, fs::{ParchFS, ParchFSInner}, BlockNo, INodeNo, PFSINode};
 
 
@@ -132,7 +132,6 @@ impl PFSBase {
     }
 
     pub fn get_blockno(&self, offset: usize, create: bool) -> Result<BlockNo, ErrorNum> {
-        let offset: usize = offset as usize;
         let fs = self.fs.clone().upgrade().unwrap();
         let mut fs_inner = fs.inner.acquire();
         let inode_guard = fs_inner.get_inode(self.inode_no)?;
@@ -358,13 +357,33 @@ impl PFSBase {
     }
     
     pub fn get_page(&self, offset: usize) -> Result<PageGuard, ErrorNum> {
+        let result = alloc_vm_page();
         if offset % BLK_SIZE != 0 {
-            Err(ErrorNum::ENOTALIGNED)
+            let offset_nxt = offset + (BLK_SIZE - (offset % BLK_SIZE));
+            let block_no_1 = self.get_blockno(offset, false)?;
+            let block_no_2 = self.get_blockno(offset_nxt, false)?;
+            
+            let block_ppn_1 = ParchFS::blockno_2_ppn(block_no_1);
+            let block_ppn_2 = ParchFS::blockno_2_ppn(block_no_2);
+
+            let ptr_src_1 = (PhysAddr::from(block_ppn_1) + (offset % BLK_SIZE)).0 as *const u8;
+            let ptr_dst_1 = PhysAddr::from(result.ppn).0 as *mut u8;
+            let ptr_len_1 = BLK_SIZE - (offset % BLK_SIZE);
+
+            let ptr_src_2 = (PhysAddr::from(block_ppn_2)).0 as *const u8;
+            let ptr_dst_2 = (PhysAddr::from(result.ppn) + ptr_len_1).0 as *mut u8;
+            let ptr_len_2 = BLK_SIZE - ptr_len_1;
+
+            unsafe {
+                core::ptr::copy_nonoverlapping(ptr_src_1, ptr_dst_1, ptr_len_1);
+                core::ptr::copy_nonoverlapping(ptr_src_2, ptr_dst_2, ptr_len_2);
+            }
         } else {
             let block_no = self.get_blockno(offset, false)?;
             let block_ppn = ParchFS::blockno_2_ppn(block_no);
-            Ok(claim_fs_page(block_ppn))
+            unsafe {PhysPageNum::copy_page(&block_ppn,&result.ppn);}
         }
+        Ok(result)
     }
 
     pub fn get_mount_uuid(&self) -> Result<UUID, ErrorNum> {

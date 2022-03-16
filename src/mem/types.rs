@@ -10,9 +10,11 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::config::{PAGE_OFFSET, PAGE_SIZE};
-use crate::process::{push_sum_on, pop_sum_on};
+use crate::process::{push_sum_on, pop_sum_on, get_processor};
 use crate::utils::ErrorNum;
 use crate::utils::range::{StepUp, StepDown, Range};
+
+use super::PageTable;
 
 #[repr(C)]
 #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
@@ -189,8 +191,10 @@ impl VirtAddr {
         }
     }
 
+    // TODO: check page mapping
     pub fn read_cstr_raw(&self, size_limit: usize) -> Vec<u8> {
-        push_sum_on();
+        let hart = get_processor();
+        hart.push_sum_on();
         let mut bytes = Vec::new();
         let mut va = self.clone();
         loop {
@@ -201,7 +205,7 @@ impl VirtAddr {
             bytes.push(b);
             va = va + size_of::<u8>();
         }
-        pop_sum_on();
+        hart.pop_sum_on();
         bytes
     }
 
@@ -211,6 +215,31 @@ impl VirtAddr {
         } else {
             VirtPageNum(((self.0 - 1) >> PAGE_OFFSET) + 1)
         }
+    }
+
+    pub fn write_user<T: Clone>(&self, pagetable: &PageTable, data: &T) -> Result<(), ()> {
+        pagetable.translate(VirtPageNum::from(*self)).map_err(|_| ())?;
+        let hart = get_processor();
+        hart.push_sum_on();
+        unsafe {
+            self.write_volatile(data);
+        }
+        hart.pop_sum_on();
+        Ok(())
+    }
+
+    pub fn write_user_data(&self, pagetable: &PageTable, data: Vec<u8>) -> Result<(), ()> {
+        for vpn in VPNRange::new(VirtPageNum::from(*self), VirtPageNum::from(*self + data.len())) {
+            pagetable.translate(VirtPageNum::from(vpn)).map_err(|_| ())?;
+        }
+        if data.len() == 0 {return Ok(());}
+        let hart = get_processor();
+        hart.push_sum_on();
+        unsafe {
+            copy_nonoverlapping(data.as_ptr(), self.0 as * mut u8, data.len());
+        }
+        hart.pop_sum_on();
+        Ok(())
     }
 }
 

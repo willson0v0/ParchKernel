@@ -330,6 +330,7 @@ impl PageTable {
         }
     }
 
+    /// only map new entry
     pub fn map(&mut self, vpn: VirtPageNum, ppn: PhysPageNum, flags: PTEFlags) {
         // verbose!("Mapping {:?} -> {:?} with flag {:?}...", vpn, ppn, flags);
         let pte_addr = self.walk_create(vpn);
@@ -342,14 +343,25 @@ impl PageTable {
         }
     }
 
+    /// only remap current entry
     pub fn remap(&mut self, vpn: VirtPageNum, ppn: PhysPageNum, flags: PTEFlags) {
         // verbose!("Mapping {:?} -> {:?} with flag {:?}...", vpn, ppn, flags);
-        let pte_addr = self.walk_create(vpn);
+        let pte_addr = self.walk_find(vpn).unwrap();
         let pte_content = PageTableEntry::new(ppn, flags | PTEFlags::V);
         unsafe{
             if !pte_addr.read_volatile::<PageTableEntry>().valid() {
                 panic!("not remap!");
             }
+            pte_addr.write_volatile(&pte_content);
+        }
+    }
+
+    /// unchecked force map
+    pub fn do_map(&mut self, vpn: VirtPageNum, ppn: PhysPageNum, flags: PTEFlags) {
+        // verbose!("Mapping {:?} -> {:?} with flag {:?}...", vpn, ppn, flags);
+        let pte_addr = self.walk_create(vpn);
+        let pte_content = PageTableEntry::new(ppn, flags | PTEFlags::V);
+        unsafe{
             pte_addr.write_volatile(&pte_content);
         }
     }

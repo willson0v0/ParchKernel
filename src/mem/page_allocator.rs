@@ -1,7 +1,9 @@
-use crate::{utils::{Mutex, SpinMutex}};
+use crate::{utils::{Mutex, SpinMutex}, config::PAGE_SIZE};
 use alloc::sync::Arc;
 use lazy_static::*;
 use super::{PhysAddr, phys_bitmap::BitMap, types::PhysPageNum};
+use core::fmt::Debug;
+use core::ops::Deref;
 
 extern "C" {
 	fn ekernel();
@@ -35,7 +37,28 @@ trait PageAllocator {
 	fn stat(&self) -> (usize, usize);
 }
 
-pub type PageGuard = Arc<PageGuardInner>;
+#[derive(Clone)]
+pub struct PageGuard(Arc<PageGuardInner>);
+
+impl Deref for PageGuard {
+    type Target = Arc<PageGuardInner>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Debug for PageGuard {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "PageGuard of {:?}", self.ppn)
+    }
+}
+
+impl PageGuard {
+	pub fn new(inner: PageGuardInner) -> Self {
+		Self(Arc::new(inner))
+	}
+}
 
 pub struct PageGuardInner {
 	pub ppn: PhysPageNum,
@@ -67,69 +90,66 @@ pub struct BitMapPageAllocator {
 impl BitMapPageAllocator {
 	fn mark_unavailable(&mut self, ppn: PhysPageNum, is_exec: bool) {
 		let index = ppn - PhysPageNum::from(PhysAddr::from(BASE_ADDRESS as usize));
-		if is_exec {
-			self.bitmap_mm.set(index);
+		if !is_exec {
+			self.bitmap_fs.set(index);
 		}
-		self.bitmap_fs.set(index);
+		self.bitmap_mm.set(index);
 	}
 
 	fn mark_available(&mut self, ppn: PhysPageNum, is_exec: bool) {
 		let index = ppn - PhysPageNum::from(PhysAddr::from(BASE_ADDRESS as usize));
-		if is_exec {
-			self.bitmap_mm.clear(index);
+		if !is_exec {
+			self.bitmap_fs.clear(index);
 		}
-		self.bitmap_fs.clear(index);
+		self.bitmap_mm.clear(index);
 	}
 }
 
 impl PageAllocator for BitMapPageAllocator {
     fn new(begin: PhysAddr, length: usize) -> Self {
 		verbose!("Initializeing BitMapPageAllocator");
-        let mut res = Self {
+        let res = Self {
 			bitmap_mm: BitMap::new((PAGE_BITMAP_MM_ADDRESS as usize).into(), (PAGE_BITMAP_FS_ADDRESS as usize - PAGE_BITMAP_MM_ADDRESS as usize) * 8),
 			bitmap_fs: BitMap::new((PAGE_BITMAP_FS_ADDRESS as usize).into(), (SUPERBLOCK_ADDRESS as usize - PAGE_BITMAP_FS_ADDRESS as usize) * 8)
 		};
 
-		// mark unavailable
-		let mut i: PhysPageNum = (BASE_ADDRESS as usize).into();
-		while i <=  PhysAddr::from(PHYS_END_ADDRESS as usize).to_ppn_ceil() {
-			if i < begin.to_ppn_ceil() || i >= (begin + length).into() {
-				res.mark_unavailable(i, true)
-			}
-			i += 1;
-		}
+		// parchfs did this for us on formating
+		// // mark unavailable
+		// let mut i: PhysPageNum = (BASE_ADDRESS as usize).into();
+		// while i <=  PhysAddr::from(PHYS_END_ADDRESS as usize).to_ppn_ceil() {
+		// 	if i < begin.to_ppn_ceil() || i >= (begin + length).into() {
+		// 		res.mark_unavailable(i, true)
+		// 	}
+		// 	i += 1;
+		// }
 
 		debug!("BitMapPageAllocator initialized.");
 		res
     }
 
     fn alloc(&mut self, is_exec: bool) -> Option<PhysPageNum> {
-		// first_empty in fs, for fs occupy pages too
-		self.bitmap_fs.first_empty().and_then(
-			|block_id: usize| -> Option<PhysPageNum> {
-				if is_exec {
-					assert!(!self.bitmap_mm.get(block_id), "Already allocated as exec");
-				}
-				assert!(!self.bitmap_fs.get(block_id), "Already allocated as fs");
-				let ppn = PhysPageNum::from(PhysAddr::from(BASE_ADDRESS as usize)) + block_id;
-				// verbose!("Alloced: {:?}", ppn);
-				self.mark_unavailable(ppn, is_exec);
-				if cfg!(debug_assertions) {
-					unsafe{ppn.clear_content();}
-				}
-				Some(ppn)
-			}
-		)
+		let empty = if is_exec {
+			self.bitmap_mm.first_empty()?
+		} else {
+			self.bitmap_fs.first_empty()?
+		};
+		assert!(!self.bitmap_mm.get(empty), "Double alloc");
+		
+		let ppn = PhysPageNum::from(PhysAddr::from(BASE_ADDRESS as usize)) + empty;
+		// verbose!("Alloced: {:?}", ppn);
+		self.mark_unavailable(ppn, is_exec);
+		if cfg!(debug_assertions) {
+			unsafe{ppn.clear_content();}
+		}
+		Some(ppn)
     }
 
     fn free(&mut self, to_free: PhysPageNum, is_exec: bool) {
 		let block_id = to_free - PhysPageNum::from(PhysAddr::from(BASE_ADDRESS as usize));
-		if is_exec {
-			assert!(self.bitmap_mm.get(block_id), "Freeing non-exec page");
-		} else {
-			assert!(!self.bitmap_mm.get(block_id), "Freeing exec page");
+		assert!(self.bitmap_mm.get(block_id), "Freeing free page");
+		if !is_exec {
+			assert!(!self.bitmap_fs.get(block_id), "Freeing exec page");
 		}
-		assert!(self.bitmap_fs.get(block_id), "Freeing free page");
 		if cfg!(debug_assertions) {
 			unsafe{to_free.clear_content();}
 		}
@@ -137,11 +157,17 @@ impl PageAllocator for BitMapPageAllocator {
     }
 
     fn claim(&mut self, to_claim: PhysPageNum, is_exec: bool) {
-        self.mark_unavailable(to_claim, is_exec);
+		let block_id = to_claim - PhysPageNum::from(PhysAddr::from(BASE_ADDRESS as usize));
+		assert!(self.bitmap_mm.get(block_id), "Claiming free page");
+		if !is_exec {
+			assert!(self.bitmap_fs.get(block_id), "claiming free page");
+		}
+		// do something
+        // self.mark_unavailable(to_claim, is_exec);
     }
 
 	fn stat(&self) -> (usize, usize) {
-		(self.bitmap_fs.count(), self.bitmap_mm.count())
+		(self.bitmap_fs.count() * PAGE_SIZE, self.bitmap_mm.count() * PAGE_SIZE)
 	}
 }
 

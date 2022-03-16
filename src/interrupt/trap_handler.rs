@@ -66,19 +66,24 @@ pub fn kernel_trap() {
         Trap::Exception(Exception::InstructionPageFault)    |
         Trap::Exception(Exception::LoadPageFault)           |
         Trap::Exception(Exception::StorePageFault)          => {
-            extern "C" {fn ekernel();}
-            let phys_start: PhysPageNum = PhysAddr::from(ekernel as usize).into();
-            let phys_end: PhysPageNum = PhysAddr::from(PHYS_END_ADDR.0).to_ppn_ceil();
-            let current_ppn: PhysPageNum = PhysAddr::from(stval).into();
-            if PPNRange::new(phys_start, phys_end).contains(current_ppn) {
-                // verbose!("Lazy mapping {:?}", current_ppn);
-                // TODO: alloc all pages for identitiy mapping.
-                PageTable::from_satp().map(current_ppn.0.into(), current_ppn, PTEFlags::R | PTEFlags::W);
+            if let Some(proc) = get_processor().current() {
+                let proc_inner = unsafe{proc.inner.leak()};
+                let lazy_res = proc_inner.mem_layout.do_lazy(VirtAddr::from(stval).into());
+                if lazy_res.is_err() {
+                    fatal!("Kernel Pagefault, lazy failed with {:?}.", lazy_res.unwrap_err());
+                    fatal!("STVAL: {:x}", stval);
+                    fatal!("SEPC : {:x}", sepc);
+                    panic!("Kernel panic");
+                } else {
+                    verbose!("kernel lazy done.");
+                }
             } else {
-                fatal!("Kernel Pagefault.");
-                fatal!("STVAL: {:x}", stval);
-                fatal!("SEPC : {:x}", sepc);
-                panic!("Kernel panic");
+                if get_processor().do_lazy(VirtAddr::from(stval).into()).is_err() {
+                    fatal!("Kernel Pagefault.");
+                    fatal!("STVAL: {:x}", stval);
+                    fatal!("SEPC : {:x}", sepc);
+                    panic!("Kernel panic");
+                }
             }
         },
         _ => {
@@ -190,6 +195,22 @@ pub fn user_trap() -> ! {
                     unknown_ext => {
                         panic!("Unknown external interrupt 0x{:x}", unknown_ext)
                     }
+                }
+            },
+            Trap::Exception(Exception::InstructionPageFault)    |
+            Trap::Exception(Exception::LoadPageFault)           |
+            Trap::Exception(Exception::StorePageFault)          => {
+                let proc = get_processor().current().unwrap();
+                let mut proc_inner = proc.get_inner();
+                
+                if proc_inner.mem_layout.do_lazy(VirtAddr::from(stval).into()).is_err() {
+                    fatal!("User Pagefault.");
+                    fatal!("STVAL: {:x}", stval);
+                    fatal!("SEPC : {:x}", sepc);
+                    fatal!("User Program dead.");
+                    proc_inner.recv_signal(SignalNum::SIGSEGV).unwrap();
+                } else {
+                    verbose!("User lazy done for {:x}.", stval);
                 }
             },
             _ => {

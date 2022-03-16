@@ -2,9 +2,9 @@ use core::{mem::size_of};
 
 use alloc::{vec::Vec, sync::Arc, collections::LinkedList, borrow::ToOwned, string::String};
 
-use crate::{process::{FileDescriptor, get_processor, push_sum_on, pop_sum_on, enqueue, ProcessStatus, ProcessID, get_process, SignalNum, free_current}, mem::{VirtAddr, VMASegment, SegmentFlags, ManagedSegment, VPNRange}, utils::{ErrorNum}, fs::{Path, open, OpenMode, open_at, new_pipe}, interrupt::trap_context::TrapContext};
+use crate::{process::{FileDescriptor, get_processor, push_sum_on, pop_sum_on, enqueue, ProcessStatus, ProcessID, get_process, SignalNum, free_current}, mem::{VirtAddr, VMASegment, SegmentFlags, ManagedSegment, VPNRange, stat_mem}, utils::{ErrorNum}, fs::{Path, open, OpenMode, open_at, new_pipe}, interrupt::trap_context::TrapContext, config::PHYS_END_ADDR};
 
-use super::{syscall_num::*, types::{MMAPProt, MMAPFlag, SyscallDirent}};
+use super::{syscall_num::*, types::{MMAPProt, MMAPFlag, SyscallDirent, SyscallStat}};
 
 pub fn syscall(syscall_id: usize, args: [usize; 6]) -> Result<usize, ErrorNum> {
     let do_trace = get_processor().current().unwrap().get_inner().trace_enabled[syscall_id];
@@ -28,6 +28,7 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> Result<usize, ErrorNum> {
         SYSCALL_SBRK        => CALL_SYSCALL!(do_trace, sys_sbrk         , args[0] as isize),
         SYSCALL_GETDENTS    => CALL_SYSCALL!(do_trace, sys_getdents     , FileDescriptor::from(args[0]), VirtAddr::from(args[1]), args[2]),
         SYSCALL_PIPE        => CALL_SYSCALL!(do_trace, sys_pipe         , VirtAddr::from(args[0])),
+        SYSCALL_SYSSTAT     => CALL_SYSCALL!(do_trace, sys_sysstat      , VirtAddr::from(args[0])),
         _ => CALL_SYSCALL!(true, sys_unknown, syscall_id)
     }
 }
@@ -47,9 +48,11 @@ pub fn sys_read(fd: FileDescriptor, buf: VirtAddr, length: usize) -> Result<usiz
     // TODO: register MMAP if needed
     let res = file.read(length)?;
     let length = res.len();
-    push_sum_on();
-    unsafe {buf.write_data(res)};
-    pop_sum_on();
+    let proc = get_processor().current().unwrap();
+    let mut proc_inner = proc.get_inner();
+    if buf.write_user_data(&proc_inner.mem_layout.pagetable, res).is_err() {
+        proc_inner.recv_signal(SignalNum::SIGSEGV).unwrap();
+    }
     Ok(length)
 }
 
@@ -105,6 +108,7 @@ pub fn sys_fork() -> Result<usize, ErrorNum> {
     pcb_inner.children.push_back(child.clone());
     let pid = child.pid.0;
     child_inner.trap_context().a0 = 0;
+    child_inner.trap_context().a1 = 0;
     enqueue(child.clone());
     Ok(pid)
 }
@@ -209,7 +213,6 @@ pub fn sys_mmap(tgt_addr: VirtAddr, length: usize, prot: MMAPProt, flag: MMAPFla
         proc_inner.mem_layout.register_segment(ManagedSegment::new(VPNRange::new(
             tgt_pos.into(), (tgt_pos+length).to_vpn_ceil().into()), 
             prot.into(), 
-            None,
             length
         ));
         proc_inner.mem_layout.do_map();
@@ -265,9 +268,12 @@ pub fn sys_waitpid(pid: isize, exit_code: VirtAddr) -> Result<usize, ErrorNum> {
             // NOTE: in multicore, it can be referenced by other cores.
             // assert!(Arc::strong_count(&corpse) <= 2, "Zombie {:?} was referenced by something else, strong_count = {}", corpse.pid, Arc::strong_count(&corpse));
             info!("Zombie {:?} was killed.", corpse.pid);
-            push_sum_on();
-            unsafe{exit_code.write_volatile(&corpse_inner.exit_code.unwrap());}
-            pop_sum_on();
+            if exit_code.0 != 0 {
+                if exit_code.write_user(&pcb_inner.mem_layout.pagetable, &corpse_inner.exit_code.unwrap()).is_err() {
+                    pcb_inner.recv_signal(SignalNum::SIGSEGV).unwrap();
+                    return Err(ErrorNum::EPERM);
+                }
+            }
             return Ok(corpse.pid.0);
         } else {
             drop(pcb_inner);
@@ -310,7 +316,7 @@ pub fn sys_sigreturn() -> Result<usize, ErrorNum> {
 
 pub fn sys_getcwd(buf: VirtAddr, length: usize) -> Result<usize, ErrorNum> {
     let proc = get_processor().current().unwrap();
-    let proc_inner = proc.get_inner();
+    let mut proc_inner = proc.get_inner();
     let path = format!("{:?}", proc_inner.cwd);
     let mut path = path.into_bytes();
     // additional 1 byte for \0
@@ -319,9 +325,9 @@ pub fn sys_getcwd(buf: VirtAddr, length: usize) -> Result<usize, ErrorNum> {
     }
     path.push(0);
     let _int_guard = get_processor();
-    push_sum_on();
-    unsafe{buf.write_data(path);}
-    pop_sum_on();
+    if buf.write_user_data(&proc_inner.mem_layout.pagetable, path).is_err() {
+        proc_inner.recv_signal(SignalNum::SIGSEGV).unwrap();
+    }
     Ok(buf.0)
 }
 
@@ -362,18 +368,20 @@ pub fn sys_getdents(fd: FileDescriptor, buf: VirtAddr, count: usize) -> Result<u
     // avoid procfs deadlock
     drop(proc_inner);
     let dirents = dir_file.read_dirent()?;
+    let mut proc_inner = proc.get_inner();
     
     let mut written = 0;
-    push_sum_on();
     for (idx, dirent)in dirents.iter().enumerate() {
         if idx >= count {
             break;
         }
         let syscall_dirent = SyscallDirent::from(dirent.to_owned());
-        unsafe{(buf + idx * size_of::<SyscallDirent>()).write_volatile(&syscall_dirent);}
+        if (buf + idx * size_of::<SyscallDirent>()).write_user(&(proc_inner.mem_layout.pagetable), &syscall_dirent).is_err() {
+            proc_inner.recv_signal(SignalNum::SIGSEGV).unwrap();
+            return Err(ErrorNum::EPERM);
+        }
         written += 1;
     }
-    pop_sum_on();
     Ok(written)
 }
 
@@ -386,10 +394,31 @@ pub fn sys_pipe(ret: VirtAddr) -> Result<usize, ErrorNum> {
     let w_fd = proc_inner.register_file(w)?;
 
     let result = [r_fd, w_fd];
-    push_sum_on();
-    unsafe {ret.write_volatile(&result);}
-    pop_sum_on();
+    if ret.write_user(&proc_inner.mem_layout.pagetable, &result).is_err() {
+        proc_inner.recv_signal(SignalNum::SIGSEGV).unwrap();
+        Err(ErrorNum::EPERM)
+    } else {
+        Ok(0)
+    }
+}
 
+pub fn sys_sysstat(stat_ptr: VirtAddr) -> Result<usize, ErrorNum> {
+    let (fs_usage, mm_usage) = stat_mem();
+    extern "C" {
+        fn ekernel();
+        fn skernel();
+    }
+    let stat = SyscallStat {
+        persistant_usage: fs_usage,
+        runtime_usage: mm_usage,
+        kernel_usage: ekernel as usize - skernel as usize,
+        total_available: PHYS_END_ADDR.0 - skernel as usize,
+    };
+    let proc = get_processor().current().unwrap();
+    let mut proc_inner = proc.get_inner();
+    if stat_ptr.write_user(&proc_inner.mem_layout.pagetable, &stat).is_err() {
+        proc_inner.recv_signal(SignalNum::SIGSEGV).unwrap();
+    }
     Ok(0)
 }
 

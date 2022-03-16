@@ -152,7 +152,6 @@ extern "C" fn genesis_s() -> ! {
         milestone!("Hart 0 boot sequence done.");
         {BOOT_FIN.store(true, Ordering::Release);}
     } else {
-        interrupt::set_kernel_trap_entry();
         while !BOOT_FIN.load(Ordering::Acquire) {}
         mem::hart_init();
         interrupt::init_hart();

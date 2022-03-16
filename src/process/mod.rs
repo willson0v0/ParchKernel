@@ -36,7 +36,14 @@ pub use processor::{
 
 use lazy_static::*;
 lazy_static!{
-    pub static ref INIT_PROCESS: Arc<ProcessControlBlock> = ProcessControlBlock::new(crate::config::INIT_PROCESS_PATH.into()).unwrap();
+    pub static ref INIT_PROCESS: Arc<ProcessControlBlock> = {
+        let init = ProcessControlBlock::new(crate::config::INIT_PROCESS_PATH.into()).unwrap();
+        // let mut init_inner = init.get_inner();
+        // let elf_file = init_inner.elf_file.clone();
+        // (init_inner.entry_point, init_inner.data_end) = init_inner.mem_layout.map_elf(elf_file).unwrap();
+        // drop(init_inner);
+        init
+    };
 }
 
 pub fn init() {

@@ -15,6 +15,7 @@ pub trait Mutex<T> {
     unsafe fn force_relock(&self);
     unsafe fn force_unlock(&self);
     unsafe fn from_locked(&self) -> MutexGuard<'_, T>;
+    unsafe fn leak(&self) -> &mut T;
 }
 
 pub struct MutexGuard<'a, T> {
@@ -114,6 +115,10 @@ impl<T> Mutex<T> for SpinMutex<T> {
         result.check_intergrity();
         result
     }
+
+    unsafe fn leak(&self) -> &mut T {
+        &mut *self.data.get()
+    }
 }
 
 pub struct SleepMutex<T> {
@@ -179,6 +184,10 @@ impl<T> Mutex<T> for SleepMutex<T> {
         let result = MutexGuard{mutex: self};
         result.check_intergrity();
         result
+    }
+    
+    unsafe fn leak(&self) -> &mut T {
+        &mut *self.data.get()
     }
 }
 

@@ -17,3 +17,4 @@ pub const SYSCALL_CHDIR     : usize =  15;
 pub const SYSCALL_SBRK      : usize =  16;
 pub const SYSCALL_GETDENTS  : usize =  17;
 pub const SYSCALL_PIPE      : usize =  18;
+pub const SYSCALL_SYSSTAT   : usize =  19;

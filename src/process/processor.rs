@@ -1,5 +1,5 @@
 use core::arch::{asm, global_asm};
-use core::cell::RefCell;
+use core::cell::{RefCell, Ref};
 use core::ops::Deref;
 
 
@@ -10,11 +10,12 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use lazy_static::*;
 use crate::config::{MAX_CPUS, PROC_K_STACK_ADDR, PROC_K_STACK_SIZE};
+use crate::fs::RegularFile;
 use crate::interrupt::{fork_return};
-use crate::mem::{MemLayout};
+use crate::mem::{MemLayout, VirtPageNum};
 use crate::process::ProcessControlBlock;
 use crate::process::pcb::ProcessStatus;
-use crate::utils::{MutexGuard};
+use crate::utils::{MutexGuard, ErrorNum};
 
 use super::pcb::PCBInner;
 use super::{dequeue, enqueue, INIT_PROCESS};
@@ -81,7 +82,8 @@ lazy_static!{
 /// Struct that repersent CPU's state
 pub struct Processor {
     pub hart_id: usize,
-    inner: RefCell<ProcessorInner>
+    inner: RefCell<ProcessorInner>,
+    mem_layout: RefCell<Option<MemLayout>>
 }
 
 unsafe impl Sync for Processor{}
@@ -92,7 +94,7 @@ pub struct ProcessorInner {
     pub int_enable_b4_off: bool,        // was interrupt enabled before push_off
     pub sum_count: usize,
     pub idle_context: ProcessContext,
-    pub sche_mem_layout: Option<MemLayout>
+    // pub sche_mem_layout: Option<MemLayout>
 }
 
 pub struct ProcessorGuard {
@@ -138,7 +140,8 @@ impl Processor {
     pub fn new(hart_id: usize) -> Self {
         Self {
             hart_id,
-            inner: RefCell::new(ProcessorInner::new())
+            inner: RefCell::new(ProcessorInner::new()),
+            mem_layout: RefCell::new(None)
         }
     }
     
@@ -174,6 +177,23 @@ impl Processor {
         self.inner.borrow_mut().pcb.take()
     }
 
+    pub fn map_file(&self, file: Arc<dyn RegularFile>) -> VirtPageNum {
+        let mut layout_guard = self.mem_layout.borrow_mut();
+        let layout = layout_guard.as_mut().unwrap();
+        let length = file.stat().unwrap().file_size;
+        let res = file.register_mmap(layout, 0, length).unwrap();
+        layout.do_map();
+        res
+    }
+
+    pub fn unmap_file(&self, start_vpn: VirtPageNum) {
+        self.mem_layout.borrow_mut().as_mut().unwrap().remove_segment_by_vpn(start_vpn).unwrap();
+    }
+    
+    pub fn do_lazy(&self, vpn: VirtPageNum) -> Result<(), ErrorNum> {
+        self.mem_layout.borrow_mut().as_mut().unwrap().do_lazy(vpn)
+    }
+
     /// This function runs exclusivly on IDLE context
     /// never ending
     pub fn run(&self) -> ! {
@@ -189,7 +209,7 @@ impl Processor {
                 let idle_context = self.get_context();
                 // pcb_inner.mem_layout.pagetable.print(LogLevel::Verbose);
                 let proc_satp = pcb_inner.mem_layout.pagetable.satp(Some(proc.pid));
-                let scheuler_satp = self.inner.borrow().sche_mem_layout.as_ref().unwrap().pagetable.satp(None);
+                let scheuler_satp = self.mem_layout.borrow_mut().as_ref().unwrap().pagetable.satp(None);
                 self.inner.borrow_mut().pcb = Some(proc.clone());
                 // 1st return form scheduler, pcb_inner is locked for fork_ret();
                 // 2nd+ return from scheduler, pcb_inner is locked for to_scheduler().
@@ -280,10 +300,10 @@ impl Processor {
 
     pub fn activate_mem_layout(&self) {
         info!("Activating mem layout for hart {}", get_hart_id());
-        assert!(self.inner.borrow().sche_mem_layout.is_none(), "hart mem layout already initialized.");
+        assert!(self.mem_layout.borrow().is_none(), "hart mem layout already initialized.");
         let new_mem_layout = MemLayout::new();
         new_mem_layout.activate();
-        self.inner.borrow_mut().sche_mem_layout = Some(new_mem_layout);
+        *(self.mem_layout.borrow_mut()) = Some(new_mem_layout);
         milestone!("Hart {} scheduler memory layout activated.", get_hart_id());
     }
 
@@ -311,8 +331,7 @@ impl ProcessorInner {
             int_off_count: 0,
             int_enable_b4_off: false,
             sum_count: 0,
-            idle_context: ProcessContext::new(),
-            sche_mem_layout: None
+            idle_context: ProcessContext::new()
         }
     }
 

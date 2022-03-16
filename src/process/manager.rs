@@ -12,6 +12,7 @@ lazy_static!{
     static ref PID_ALLOCATOR: PIDAllocator = PIDAllocator::new();
 }
 
+// TODO: lock free queue
 struct ProcessManager(SpinMutex<ProcessManagerInner>);
 
 impl ProcessManager {

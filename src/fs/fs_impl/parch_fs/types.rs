@@ -287,10 +287,13 @@ impl RegularFile for PFSRegular {
         }
         let mut inner = self.0.acquire();
         if let Some(start_vpn) = inner.base.mmap_start {
+            // TODO: multiple vma for one file
             return Ok(start_vpn);   
         }
         let stat = inner.base.stat()?;
         let start_vpn = mem_layout.get_space(stat.file_size)?;
+        inner.base.mmap_start = Some(start_vpn);
+        drop(inner);
         mem_layout.register_segment(VMASegment::new_at(
             start_vpn,
             self.clone(),
@@ -298,7 +301,6 @@ impl RegularFile for PFSRegular {
             offset,
             length
         )?);
-        inner.base.mmap_start = Some(start_vpn);
         Ok(start_vpn)
     }
 }

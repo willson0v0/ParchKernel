@@ -282,7 +282,7 @@ impl BitMap {
         }
     }
 
-    /// Slow method, only use in profiling!
+    /// only use in profiling!
     pub fn count(&self) -> usize {
         let mut res = 0;
         for i in 0..(self.length/64) {
