@@ -3,6 +3,7 @@ use core::fmt::{self, Debug, Formatter};
 use core::cmp::min;
 
 
+use _core::any::Any;
 use alloc::{sync::{Arc}, collections::BTreeMap, vec::Vec, borrow::ToOwned};
 use bitflags::*;
 use crate::fs::File;
@@ -80,9 +81,10 @@ impl PageGuardSlot {
 
 pub trait Segment: Debug + Send + Sync {
     fn as_segment   <'a>(self: Arc<Self>) -> Arc<dyn Segment + 'a> where Self: 'a;
-    fn as_identical <'a>(self: Arc<Self>) -> Result<Arc<IdenticalMappingSegment >, ErrorNum> where Self: 'a;
-    fn as_managed   <'a>(self: Arc<Self>) -> Result<Arc<ManagedSegment          >, ErrorNum> where Self: 'a;
-    fn as_vma       <'a>(self: Arc<Self>) -> Result<Arc<VMASegment              >, ErrorNum> where Self: 'a;
+    fn as_any       <'a>(self: Arc<Self>) -> Arc<dyn Any + Send + Sync> where Self: 'a;
+    // fn as_identical <'a>(self: Arc<Self>) -> Result<Arc<IdenticalMappingSegment >, ErrorNum> where Self: 'a;
+    // fn as_managed   <'a>(self: Arc<Self>) -> Result<Arc<ManagedSegment          >, ErrorNum> where Self: 'a;
+    // fn as_vma       <'a>(self: Arc<Self>) -> Result<Arc<VMASegment              >, ErrorNum> where Self: 'a;
     fn do_map(&self, pagetable: &mut PageTable) -> Result<(), ErrorNum>;
     fn do_unmap(&self, pagetable: &mut PageTable) -> Result<(), ErrorNum>;
     fn status(&self) -> SegmentStatus;
@@ -131,13 +133,16 @@ impl Debug for ArcSegment {
 // delegate functions.
 impl ArcSegment {
     pub fn as_identical<'a>(self) -> Result<Arc<IdenticalMappingSegment>, ErrorNum> where Self: 'a {
-        self.0.as_identical()
+        Arc::downcast(self.0.as_any()).map_err(|_| ErrorNum::EWRONGSEG)
     }
     pub fn as_managed<'a>(self) -> Result<Arc<ManagedSegment>, ErrorNum> where Self: 'a{
-        self.0.as_managed()
+        Arc::downcast(self.0.as_any()).map_err(|_| ErrorNum::EWRONGSEG)
     }
     pub fn as_vma<'a>(self) -> Result<Arc<VMASegment>, ErrorNum> where Self: 'a{
-        self.0.as_vma()
+        Arc::downcast(self.0.as_any()).map_err(|_| ErrorNum::EWRONGSEG)
+    }
+    pub fn as_program<'a>(self) -> Result<Arc<ProgramSegment>, ErrorNum> where Self: 'a{
+        Arc::downcast(self.0.as_any()).map_err(|_| ErrorNum::EWRONGSEG)
     }
     pub fn do_map(&self, pagetable: &mut PageTable) -> Result<(), ErrorNum>{
         self.0.do_map(pagetable)
@@ -203,8 +208,7 @@ pub struct UTrampolineSegmentInner {
 pub struct TrapContextSegment (pub SpinMutex<TrapContextSegmentInner>);
 pub struct TrapContextSegmentInner {
     pub status: SegmentStatus,
-    pub page: Option<PageGuard>,
-    pub clone_source: Option<Arc<TrapContextSegment>>
+    pub page: Option<PageGuard>
 }
 
 pub struct ProcKStackSegment (SpinMutex<ProcKStackSegmentInner>);
@@ -217,6 +221,15 @@ pub struct ProcUStackSegment (pub SpinMutex<ProcUStackSegmentInner>);
 pub struct ProcUStackSegmentInner {
     pub status: SegmentStatus,
     pub frames: BTreeMap<VirtPageNum, PageGuardSlot>,
+}
+
+pub struct ProgramSegment (SpinMutex<ProgramSegmentInner>);
+pub struct ProgramSegmentInner {
+    frames: BTreeMap<VirtPageNum, PageGuardSlot>,
+    flag: SegmentFlags,
+    status: SegmentStatus,
+    start_vpn: VirtPageNum,
+    mem_length: usize,
 }
 
 impl Debug for IdenticalMappingSegment {
@@ -276,22 +289,21 @@ impl Debug for ProcUStackSegment {
     }
 }
 
+impl Debug for ProgramSegment {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let inner = self.0.acquire();
+        f.write_fmt(format_args!("{:?} Program segment of {} frames @ {:?} with flag {:?}", inner.status, inner.frames.len(), inner.start_vpn, inner.flag))
+    }
+}
+
 impl Segment for IdenticalMappingSegment {
     fn as_segment<'a>(self: Arc<Self>) -> Arc<dyn Segment + 'a> where Self: 'a {
         self
     }
 
-    fn as_identical<'a>(self: Arc<Self>) -> Result<Arc<IdenticalMappingSegment>, ErrorNum>
+    fn as_any<'a>(self: Arc<Self>) -> Arc<dyn Any + Send + Sync + 'static>
     where Self: 'a {
-        Ok(self)
-    }
-
-    fn as_managed   <'a>(self: Arc<Self>) -> Result<Arc<ManagedSegment>, ErrorNum> where Self: 'a {
-        Err(ErrorNum::EWRONGSEG)
-    }
-
-    fn as_vma       <'a>(self: Arc<Self>) -> Result<Arc<VMASegment>, ErrorNum> where Self: 'a {
-        Err(ErrorNum::EWRONGSEG)
+        self
     }
 
     fn do_map(&self, pagetable: &mut PageTable) -> Result<(), ErrorNum> {
@@ -347,17 +359,9 @@ impl Segment for ManagedSegment {
         self
     }
 
-    fn as_identical<'a>(self: Arc<Self>) -> Result<Arc<IdenticalMappingSegment>, ErrorNum>
+    fn as_any<'a>(self: Arc<Self>) -> Arc<dyn Any + Send + Sync + 'static>
     where Self: 'a {
-        Err(ErrorNum::EWRONGSEG)
-    }
-
-    fn as_managed   <'a>(self: Arc<Self>) -> Result<Arc<ManagedSegment>, ErrorNum> where Self: 'a {
-        Ok(self)
-    }
-
-    fn as_vma       <'a>(self: Arc<Self>) -> Result<Arc<VMASegment>, ErrorNum> where Self: 'a {
-        Err(ErrorNum::EWRONGSEG)
+        self
     }
 
     fn do_map(&self, pagetable: &mut PageTable) -> Result<(), ErrorNum> {
@@ -447,7 +451,7 @@ impl Segment for ManagedSegment {
                     inner.frames.insert(vpn, PageGuardSlot::Populated(cow_source.clone()));
                     cow_source
                 } else {
-                    verbose!("COW triggered.");
+                    verbose!("COW triggered for managed.");
                     let pageguard = alloc_vm_page();
                     unsafe {PhysPageNum::copy_page(&cow_source.ppn, &pageguard.ppn)}
                     inner.frames.insert(vpn, PageGuardSlot::Populated(pageguard.clone()));
@@ -478,17 +482,9 @@ impl Segment for VMASegment {
         self
     }
 
-    fn as_identical<'a>(self: Arc<Self>) -> Result<Arc<IdenticalMappingSegment>, ErrorNum>
+    fn as_any<'a>(self: Arc<Self>) -> Arc<dyn Any + Send + Sync + 'static>
     where Self: 'a {
-        Err(ErrorNum::EWRONGSEG)
-    }
-
-    fn as_managed   <'a>(self: Arc<Self>) -> Result<Arc<ManagedSegment>, ErrorNum> where Self: 'a {
-        Err(ErrorNum::EWRONGSEG)
-    }
-
-    fn as_vma       <'a>(self: Arc<Self>) -> Result<Arc<VMASegment>, ErrorNum> where Self: 'a {
-        Ok(self)
+        self
     }
 
     fn do_map(&self, pagetable: &mut PageTable) -> Result<(), ErrorNum> {
@@ -572,10 +568,7 @@ impl Segment for VMASegment {
             match pageslot {
                 PageGuardSlot::Unmapped => return Err(ErrorNum::EPERM), // was unmapped
                 PageGuardSlot::LazyAlloc => {
-                    verbose!("lazy alloc triggered.");
-                    let pg = alloc_vm_page();
-                    inner.frames.insert(vpn, PageGuardSlot::Populated(pg.clone()));
-                    pagetable.map(vpn, pg.ppn, inner.flag.into())
+                    panic!("bad type, no lazy alloc on vma")
                 },
                 PageGuardSlot::Populated(_) => return Err(ErrorNum::EPERM), // real pagefault
                 PageGuardSlot::CopyOnWrite(content) => {
@@ -621,16 +614,9 @@ impl Segment for TrampolineSegment {
         self
     }
 
-    fn as_identical <'a>(self: Arc<Self>) -> Result<Arc<IdenticalMappingSegment >, ErrorNum> where Self: 'a {
-        Err(ErrorNum::EWRONGSEG)
-    }
-
-    fn as_managed   <'a>(self: Arc<Self>) -> Result<Arc<ManagedSegment          >, ErrorNum> where Self: 'a {
-        Err(ErrorNum::EWRONGSEG)
-    }
-
-    fn as_vma       <'a>(self: Arc<Self>) -> Result<Arc<VMASegment              >, ErrorNum> where Self: 'a {
-        Err(ErrorNum::EWRONGSEG)
+    fn as_any<'a>(self: Arc<Self>) -> Arc<dyn Any + Send + Sync + 'static>
+    where Self: 'a {
+        self
     }
 
     fn do_map(&self, pagetable: &mut PageTable) -> Result<(), ErrorNum> {
@@ -685,16 +671,9 @@ impl Segment for UTrampolineSegment {
         self
     }
 
-    fn as_identical <'a>(self: Arc<Self>) -> Result<Arc<IdenticalMappingSegment >, ErrorNum> where Self: 'a {
-        Err(ErrorNum::EWRONGSEG)
-    }
-
-    fn as_managed   <'a>(self: Arc<Self>) -> Result<Arc<ManagedSegment          >, ErrorNum> where Self: 'a {
-        Err(ErrorNum::EWRONGSEG)
-    }
-
-    fn as_vma       <'a>(self: Arc<Self>) -> Result<Arc<VMASegment              >, ErrorNum> where Self: 'a {
-        Err(ErrorNum::EWRONGSEG)
+    fn as_any<'a>(self: Arc<Self>) -> Arc<dyn Any + Send + Sync + 'static>
+    where Self: 'a {
+        self
     }
 
     fn do_map(&self, pagetable: &mut PageTable) -> Result<(), ErrorNum> {
@@ -750,16 +729,9 @@ impl Segment for TrapContextSegment {
         self
     }
 
-    fn as_identical <'a>(self: Arc<Self>) -> Result<Arc<IdenticalMappingSegment >, ErrorNum> where Self: 'a {
-        Err(ErrorNum::EWRONGSEG)
-    }
-
-    fn as_managed   <'a>(self: Arc<Self>) -> Result<Arc<ManagedSegment          >, ErrorNum> where Self: 'a {
-        Err(ErrorNum::EWRONGSEG)
-    }
-
-    fn as_vma       <'a>(self: Arc<Self>) -> Result<Arc<VMASegment              >, ErrorNum> where Self: 'a {
-        Err(ErrorNum::EWRONGSEG)
+    fn as_any<'a>(self: Arc<Self>) -> Arc<dyn Any + Send + Sync + 'static>
+    where Self: 'a {
+        self
     }
 
     fn do_map(&self, pagetable: &mut PageTable) -> Result<(), ErrorNum> {
@@ -767,19 +739,23 @@ impl Segment for TrapContextSegment {
         if inner.status != SegmentStatus::Initialized {
             return Err(ErrorNum::EMMAPED);
         }
-        let pageguard = alloc_vm_page();
-        let ppn = pageguard.ppn;
-        if let Some(source) = inner.clone_source.take() {
-            let source_ppn = source.0.acquire().page.as_ref().unwrap().ppn;
-            unsafe {PhysPageNum::copy_page(&source_ppn, &ppn)}
+        if let Some(pg) = inner.page.clone() {
+            pagetable.map(
+                TRAP_CONTEXT_ADDR.into(),
+                pg.ppn, 
+                PTEFlags::R | PTEFlags::W
+            );
+        } else {
+            let pageguard = alloc_vm_page();
+            let ppn = pageguard.ppn;
+            pagetable.map(
+                TRAP_CONTEXT_ADDR.into(),
+                ppn, 
+                PTEFlags::R | PTEFlags::W
+            );
+            inner.page = Some(pageguard);
         }
-        pagetable.map(
-            TRAP_CONTEXT_ADDR.into(),
-            ppn, 
-            PTEFlags::R | PTEFlags::W
-        );
         inner.status = SegmentStatus::Mapped;
-        inner.page = Some(pageguard);
         Ok(())
     }
 
@@ -799,8 +775,16 @@ impl Segment for TrapContextSegment {
         vpn == TRAP_CONTEXT_ADDR.into()
     }
 
-    fn clone_seg(self: Arc<Self>, pagetable: &mut PageTable) -> Result<ArcSegment, ErrorNum> {
-        Ok(Self::new(Some(self.clone())))
+    fn clone_seg(self: Arc<Self>, _pagetable: &mut PageTable) -> Result<ArcSegment, ErrorNum> {
+        // Ok(Self::new(Some(self.clone())))
+        let inner = self.0.acquire();
+        let new_page = alloc_vm_page();
+        unsafe{PhysPageNum::copy_page(&inner.page.as_ref().unwrap().ppn, &new_page.ppn)}
+        let res = TrapContextSegmentInner{
+            status: SegmentStatus::Initialized,
+            page: Some(new_page),
+        };
+        Ok(Arc::new(Self(SpinMutex::new("segment", res))).as_segment().into())
     }
 
     fn do_lazy(&self, vpn: VirtPageNum, _pagetable: &mut PageTable) -> Result<(), ErrorNum> {
@@ -817,16 +801,9 @@ impl Segment for ProcKStackSegment {
         self
     }
 
-    fn as_identical <'a>(self: Arc<Self>) -> Result<Arc<IdenticalMappingSegment >, ErrorNum> where Self: 'a {
-        Err(ErrorNum::EWRONGSEG)
-    }
-
-    fn as_managed   <'a>(self: Arc<Self>) -> Result<Arc<ManagedSegment          >, ErrorNum> where Self: 'a {
-        Err(ErrorNum::EWRONGSEG)
-    }
-
-    fn as_vma       <'a>(self: Arc<Self>) -> Result<Arc<VMASegment              >, ErrorNum> where Self: 'a {
-        Err(ErrorNum::EWRONGSEG)
+    fn as_any<'a>(self: Arc<Self>) -> Arc<dyn Any + Send + Sync + 'static>
+    where Self: 'a {
+        self
     }
 
     fn do_map(&self, pagetable: &mut PageTable) -> Result<(), ErrorNum> {
@@ -895,16 +872,9 @@ impl Segment for ProcUStackSegment {
         self
     }
 
-    fn as_identical <'a>(self: Arc<Self>) -> Result<Arc<IdenticalMappingSegment >, ErrorNum> where Self: 'a {
-        Err(ErrorNum::EWRONGSEG)
-    }
-
-    fn as_managed   <'a>(self: Arc<Self>) -> Result<Arc<ManagedSegment          >, ErrorNum> where Self: 'a {
-        Err(ErrorNum::EWRONGSEG)
-    }
-
-    fn as_vma       <'a>(self: Arc<Self>) -> Result<Arc<VMASegment              >, ErrorNum> where Self: 'a {
-        Err(ErrorNum::EWRONGSEG)
+    fn as_any<'a>(self: Arc<Self>) -> Arc<dyn Any + Send + Sync + 'static>
+    where Self: 'a {
+        self
     }
 
     fn do_map(&self, pagetable: &mut PageTable) -> Result<(), ErrorNum> {
@@ -953,7 +923,7 @@ impl Segment for ProcUStackSegment {
         let mut inner = self.0.acquire();
 
         let frames: BTreeMap<VirtPageNum, PageGuardSlot> = inner.frames.iter().map(|(vpn, pgs)| -> (VirtPageNum, PageGuardSlot) {
-            match pgs {
+            match pgs.clone() {
                 PageGuardSlot::LazyAlloc => (*vpn, PageGuardSlot::LazyAlloc),
                 PageGuardSlot::Populated(content) => {
                     verbose!("Remapping u stack clone source {:?} to non writable", *vpn);
@@ -1000,7 +970,7 @@ impl Segment for ProcUStackSegment {
                         inner.frames.insert(vpn, PageGuardSlot::Populated(cow_source.clone()));
                         cow_source
                     } else {
-                        verbose!("COW triggered.");
+                        verbose!("COW triggered for u stack.");
                         let pageguard = alloc_vm_page();
                         unsafe {PhysPageNum::copy_page(&cow_source.ppn, &pageguard.ppn)}
                         inner.frames.insert(vpn, PageGuardSlot::Populated(pageguard.clone()));
@@ -1009,6 +979,143 @@ impl Segment for ProcUStackSegment {
                     pagetable.do_map(vpn, tgt_page.ppn, PTEFlags::R | PTEFlags::W | PTEFlags::U);
                 },
                 PageGuardSlot::LazyVMA(_) => panic!("lazy vma in proc u stack"),
+            }
+            Ok(())
+        } else {
+            Err(ErrorNum::EOOR)
+        }
+    }
+}
+
+
+impl Segment for ProgramSegment {
+    fn as_segment<'a>(self: Arc<Self>) -> Arc<dyn Segment + 'a> where Self: 'a {
+        self
+    }
+
+    fn as_any<'a>(self: Arc<Self>) -> Arc<dyn Any + Send + Sync + 'static>
+    where Self: 'a {
+        self
+    }
+
+    fn do_map(&self, pagetable: &mut PageTable) -> Result<(), ErrorNum> {
+        let mut inner = self.0.acquire();
+        if inner.status != SegmentStatus::Initialized {
+            return Err(ErrorNum::EMMAPED);
+        }
+
+        for (vpn, pgs) in inner.frames.iter() {
+            if let PageGuardSlot::CopyOnWrite(pg) = pgs {
+                pagetable.map(*vpn, pg.ppn, (inner.flag & SegmentFlags::W.complement()).into());
+            }
+        }
+        inner.status = SegmentStatus::Mapped;
+
+        Ok(())
+    }
+
+    fn do_unmap(&self, pagetable: &mut PageTable) -> Result<(), ErrorNum> {
+        let mut inner = self.0.acquire();
+        if inner.status != SegmentStatus::Mapped {
+            return Err(ErrorNum::ENOSEG);
+        }
+        assert!(inner.status == SegmentStatus::Mapped);
+        for (vpn, _pg) in &inner.frames {
+            pagetable.unmap(*vpn);
+        }
+        inner.frames.clear();
+        inner.status = SegmentStatus::Zombie;
+        Ok(())
+    }
+
+    fn status(&self) -> SegmentStatus {
+        self.0.acquire().status
+    }
+
+    fn seg_type(&self) -> SegmentType {
+        SegmentType::VMA
+    }
+
+    fn contains(&self, vpn: VirtPageNum) -> bool {
+        self.0.acquire().frames.keys().any(|&x| x == vpn)
+    }
+
+    fn clone_seg(self: Arc<Self>, pagetable: &mut PageTable) -> Result<ArcSegment, ErrorNum> {
+        let mut inner = self.0.acquire();
+    
+        let new_frames: BTreeMap<VirtPageNum, PageGuardSlot> = inner.frames.iter().map(|(vpn, slot)| -> (VirtPageNum, PageGuardSlot) {
+            let new_slot = match slot {
+                PageGuardSlot::CopyOnWrite(content) => PageGuardSlot::CopyOnWrite(content.clone()),
+                PageGuardSlot::Populated(content) => {
+                    pagetable.remap(*vpn, content.ppn, (inner.flag & SegmentFlags::W.complement()).into()); // disable write to trigger cow
+                    PageGuardSlot::CopyOnWrite(content.clone())
+                },
+                PageGuardSlot::LazyVMA((file, offset)) =>  PageGuardSlot::LazyVMA((file.clone(), *offset)),
+                PageGuardSlot::LazyAlloc =>  PageGuardSlot::LazyAlloc,
+                _ => panic!("Bad slot type in vma")
+            };
+
+            (*vpn, new_slot)
+        }).collect();
+
+        inner.frames = new_frames.clone();
+
+        let res = Self (SpinMutex::new("segment", ProgramSegmentInner {
+            frames: new_frames,
+            flag: inner.flag,
+            status: SegmentStatus::Initialized,
+            start_vpn: inner.start_vpn,
+            mem_length: inner.mem_length
+        }));
+
+        Ok(Arc::new(res).as_segment().into())
+    }
+
+    fn do_lazy(&self, vpn: VirtPageNum, pagetable: &mut PageTable) -> Result<(), ErrorNum> {
+        let mut inner = self.0.acquire();
+
+        if inner.frames.contains_key(&vpn) {
+            let pageslot = inner.frames.get(&vpn).cloned().unwrap();
+
+            match pageslot {
+                PageGuardSlot::Unmapped => return Err(ErrorNum::EPERM), // was unmapped
+                PageGuardSlot::LazyAlloc => {
+                    verbose!("lazy alloc triggered.");
+                    let pg = alloc_vm_page();
+                    inner.frames.insert(vpn, PageGuardSlot::Populated(pg.clone()));
+                    pagetable.map(vpn, pg.ppn, inner.flag.into())
+                },
+                PageGuardSlot::Populated(_) => return Err(ErrorNum::EPERM), // real pagefault
+                PageGuardSlot::CopyOnWrite(content) => {
+                    if !inner.flag.contains(SegmentFlags::W) {
+                        // real pagefault
+                        return Err(ErrorNum::EPERM)
+                    }
+    
+                    debug_assert!(inner.flag.contains(SegmentFlags::R) && inner.flag.contains(SegmentFlags::W), "lazy bad seg");
+    
+                    // one here, one remain in frames
+                    // no data race here, for this segment was locked and content will not be copied,
+                    // and there are no other segment holding such content.
+                    let tgt_page = if Arc::strong_count(&content) == 2 {
+                        verbose!("Only one refrence left on cow page, not copying.");
+                        inner.frames.insert(vpn, PageGuardSlot::Populated(content.clone()));
+                        content
+                    } else {
+                        verbose!("COW triggered for program.");
+                        let pageguard = alloc_vm_page();
+                        unsafe {PhysPageNum::copy_page(&content.ppn, &pageguard.ppn)}
+                        inner.frames.insert(vpn, PageGuardSlot::Populated(pageguard.clone()));
+                        pageguard
+                    };
+                    pagetable.remap(vpn, tgt_page.ppn, inner.flag.into())
+                },
+                PageGuardSlot::LazyVMA((file, offset)) => {
+                    verbose!("lazy vma triggered.");
+                    let pg = file.get_page(offset)?;
+                    pagetable.map(vpn, pg.ppn, inner.flag.into());
+                    inner.frames.insert(vpn, PageGuardSlot::Populated(pg));
+                },
             }
             Ok(())
         } else {
@@ -1060,52 +1167,52 @@ impl ManagedSegment {
         original_flag
     }
 
-    pub fn grow(&self, increment: usize, pagetable: &mut PageTable) -> Result<VirtAddr, ErrorNum> {
-        let mut inner = self.0.acquire();
-        let mut map_iter = inner.range.end();
-        let tgt_va: VirtAddr = VirtAddr::from(inner.range.start()) + inner.byte_len + increment;
-        info!("Growing managed segment, original end {:?}, original length {}, increment {}", inner.range.end(), inner.byte_len, increment);
-        while tgt_va.to_vpn_ceil() >= map_iter {
-            debug!("registering lazy vpn {:?}", map_iter);
-            // let pg = alloc_vm_page();
-            // let ppn = pg.ppn;
-            // pagetable.map(map_iter, ppn, inner.flag.into());
-            inner.frames.insert(map_iter, PageGuardSlot::LazyAlloc);
-            map_iter = map_iter + 1;
-        }
-        inner.byte_len = inner.byte_len + increment;
-        inner.range.end = map_iter;
-        info!("Grow done, new end {:?}, new length {}", inner.range.end(), inner.byte_len);
-        Ok(VirtAddr::from(inner.range.start()) + inner.byte_len)
-    }
+    // pub fn grow(&self, increment: usize, pagetable: &mut PageTable) -> Result<VirtAddr, ErrorNum> {
+    //     let mut inner = self.0.acquire();
+    //     let mut map_iter = inner.range.end();
+    //     let tgt_va: VirtAddr = VirtAddr::from(inner.range.start()) + inner.byte_len + increment;
+    //     info!("Growing managed segment, original end {:?}, original length {}, increment {}", inner.range.end(), inner.byte_len, increment);
+    //     while tgt_va.to_vpn_ceil() >= map_iter {
+    //         debug!("registering lazy vpn {:?}", map_iter);
+    //         // let pg = alloc_vm_page();
+    //         // let ppn = pg.ppn;
+    //         // pagetable.map(map_iter, ppn, inner.flag.into());
+    //         inner.frames.insert(map_iter, PageGuardSlot::LazyAlloc);
+    //         map_iter = map_iter + 1;
+    //     }
+    //     inner.byte_len = inner.byte_len + increment;
+    //     inner.range.end = map_iter;
+    //     info!("Grow done, new end {:?}, new length {}", inner.range.end(), inner.byte_len);
+    //     Ok(VirtAddr::from(inner.range.start()) + inner.byte_len)
+    // }
 
-    pub fn shrink(&self, decrement: usize, pagetable: &mut PageTable) -> Result<VirtAddr, ErrorNum> {
-        let mut inner = self.0.acquire();
-        let mut map_iter = inner.range.end() - 1;
-        let tgt_va: VirtAddr = VirtAddr::from(inner.range.start()) + inner.byte_len - decrement;
-        info!("Shrinking managed segment, original end {:?}, decrement {}", inner.range.end(), decrement);
-        while tgt_va.to_vpn_ceil() < map_iter {
-            debug!("Unapping vpn {:?}", map_iter);
-            // remove pg
-            let slot = inner.frames.remove(&map_iter).unwrap();
-            match slot {
-                PageGuardSlot::LazyAlloc => { /* do nothing */ },
-                PageGuardSlot::Populated(_) => {
-                    pagetable.unmap(map_iter);
-                },
-                PageGuardSlot::CopyOnWrite(_) => {
-                    pagetable.unmap(map_iter);
-                },
-                _ => panic!("bad slot type"),
-            }
-            map_iter = map_iter - 1;
-        }
-        inner.byte_len = inner.byte_len - decrement;
-        inner.range.end = map_iter;
-        info!("Grow done, new end {:?}, new length {}", inner.range.end(), inner.byte_len);
-        Ok(VirtAddr::from(inner.range.start()) + inner.byte_len)
+    // pub fn shrink(&self, decrement: usize, pagetable: &mut PageTable) -> Result<VirtAddr, ErrorNum> {
+    //     let mut inner = self.0.acquire();
+    //     let mut map_iter = inner.range.end() - 1;
+    //     let tgt_va: VirtAddr = VirtAddr::from(inner.range.start()) + inner.byte_len - decrement;
+    //     info!("Shrinking managed segment, original end {:?}, decrement {}", inner.range.end(), decrement);
+    //     while tgt_va.to_vpn_ceil() < map_iter {
+    //         debug!("Unapping vpn {:?}", map_iter);
+    //         // remove pg
+    //         let slot = inner.frames.remove(&map_iter).unwrap();
+    //         match slot {
+    //             PageGuardSlot::LazyAlloc => { /* do nothing */ },
+    //             PageGuardSlot::Populated(_) => {
+    //                 pagetable.unmap(map_iter);
+    //             },
+    //             PageGuardSlot::CopyOnWrite(_) => {
+    //                 pagetable.unmap(map_iter);
+    //             },
+    //             _ => panic!("bad slot type"),
+    //         }
+    //         map_iter = map_iter - 1;
+    //     }
+    //     inner.byte_len = inner.byte_len - decrement;
+    //     inner.range.end = map_iter;
+    //     info!("Grow done, new end {:?}, new length {}", inner.range.end(), inner.byte_len);
+    //     Ok(VirtAddr::from(inner.range.start()) + inner.byte_len)
 
-    }
+    // }
 
     pub fn get_end_va(&self) -> VirtAddr {
         let inner = self.0.acquire();
@@ -1150,8 +1257,8 @@ impl UTrampolineSegment {
 }
 
 impl TrapContextSegment {
-    pub fn new(clone_source: Option<Arc<TrapContextSegment>>) -> ArcSegment {
-        Arc::new(Self(SpinMutex::new("Segment lock",  TrapContextSegmentInner{ status: SegmentStatus::Initialized, page: None, clone_source} ))).as_segment().into()
+    pub fn new() -> ArcSegment {
+        Arc::new(Self(SpinMutex::new("Segment lock",  TrapContextSegmentInner{ status: SegmentStatus::Initialized, page: None} ))).as_segment().into()
     }
 }
 
@@ -1172,5 +1279,56 @@ impl ProcUStackSegment {
             })
             .collect();
         Arc::new(Self(SpinMutex::new("Segment lock", ProcUStackSegmentInner{ status: SegmentStatus::Initialized, frames}))).as_segment().into()
+    }
+}
+
+impl ProgramSegment {
+    /// file_offset and length are in bytes
+    pub fn new_at(start_vpn: VirtPageNum, file: Arc<dyn RegularFile>, flag: SegmentFlags, file_offset: usize, file_length: usize, mem_length: usize) -> Result<ArcSegment, ErrorNum> {
+        let page_count = (mem_length - 1) / PAGE_SIZE + 1;
+        let mut frames = BTreeMap::new();
+        for i in 0..page_count {
+            let offset = i * PAGE_SIZE;
+            let vpn = start_vpn + i;
+            if offset >= file_length {
+                frames.insert(vpn, PageGuardSlot::LazyAlloc);
+            } else {
+                frames.insert(vpn, PageGuardSlot::LazyVMA((file.clone(), file_offset + offset)));
+            }
+        }
+        let res = ProgramSegmentInner {
+            frames,
+            flag,
+            status: SegmentStatus::Initialized,
+            start_vpn,
+            mem_length,
+        };
+        Ok(Arc::new(ProgramSegment(SpinMutex::new("Segment lock", res))).as_segment().into())
+    }
+
+    // TODO : grow/shrink
+    pub fn alter_size(&self, alteration: isize, pagetable: &mut PageTable) -> Result<usize, ErrorNum> {
+        let mut inner = self.0.acquire();
+        let current_last_va = VirtAddr::from(inner.start_vpn) + inner.mem_length;
+        if alteration > 0 {
+            let grow_start = current_last_va.to_vpn_ceil();
+            let grow_end = (current_last_va + alteration as usize).to_vpn_ceil();
+            for vpn in VPNRange::new(grow_start, grow_end) {
+                inner.frames.insert(vpn, PageGuardSlot::LazyAlloc);
+            }
+            inner.mem_length += alteration as usize;
+        } else if alteration < 0 {
+            let shrink_start: VirtPageNum = (current_last_va.0.wrapping_add(alteration as usize)).into(); // this is actually a minus
+            let shrink_end: VirtPageNum = current_last_va.into();
+            for vpn in VPNRange::new(shrink_start, shrink_end) {
+                match inner.frames.remove(&vpn).unwrap() {
+                    PageGuardSlot::Populated(_)   |
+                    PageGuardSlot::CopyOnWrite(_) => pagetable.unmap(vpn),
+                    _ => {/* do nothing since not mapped */},
+                }
+            }
+            inner.mem_length = (inner.mem_length as isize - alteration) as usize;
+        }
+        Ok(inner.mem_length)
     }
 }

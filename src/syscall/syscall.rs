@@ -102,7 +102,7 @@ pub fn sys_dup(fd: FileDescriptor) -> Result<usize, ErrorNum> {
 pub fn sys_fork() -> Result<usize, ErrorNum> {
     let proc = get_processor().current().unwrap();
     let child = proc.fork()?;
-    let mut pcb_inner = proc.get_inner();
+    let mut pcb_inner = proc.get_inner();   // always lock parent first, then child
     let mut child_inner = child.get_inner();
     child_inner.parent = Some(Arc::downgrade(&proc));
     pcb_inner.children.push_back(child.clone());
@@ -349,15 +349,8 @@ pub fn sys_chdir(buf: VirtAddr) -> Result<usize, ErrorNum> {
 pub fn sys_sbrk(increment: isize) -> Result<usize, ErrorNum> {
     let proc = get_processor().current().unwrap();
     let mut proc_inner = proc.get_inner();
-    let data_segment = proc_inner.mem_layout.get_segment((proc_inner.data_end - 1).into())?.as_managed()?;
-    let res = if increment > 0 {
-        data_segment.grow(increment as usize, &mut proc_inner.mem_layout.pagetable)?
-    } else if increment < 0 {
-        data_segment.shrink(-increment as usize, &mut proc_inner.mem_layout.pagetable)?
-    } else {
-        data_segment.get_end_va()
-    };
-    Ok(res.0)
+    let data_segment = proc_inner.mem_layout.get_segment((proc_inner.data_end - 1).into())?.as_program()?;
+    data_segment.alter_size(increment, &mut proc_inner.mem_layout.pagetable)
 }
 
 pub fn sys_getdents(fd: FileDescriptor, buf: VirtAddr, count: usize) -> Result<usize, ErrorNum>{

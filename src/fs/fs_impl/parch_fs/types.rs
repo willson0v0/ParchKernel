@@ -274,11 +274,7 @@ impl File for PFSRegular {
 
 impl RegularFile for PFSRegular {
     fn get_page(&self, offset: usize) -> Result<crate::mem::PageGuard, crate::utils::ErrorNum> {
-        if offset % PAGE_SIZE != 0 {
-            Err(ErrorNum::ENOTALIGNED)
-        } else {
-            self.0.acquire().base.get_page(offset)
-        }
+        self.0.acquire().base.get_page(offset)
     }
 
     fn register_mmap(self: Arc<Self>, mem_layout: &mut crate::mem::MemLayout, offset: usize, length: usize) -> Result<crate::mem::VirtPageNum, ErrorNum> {

@@ -2,7 +2,7 @@ use core::{arch::asm};
 
 use alloc::{vec::Vec, sync::Arc, borrow::ToOwned, string::String};
 use riscv::register::{satp};
-use crate::{utils::{ErrorNum}, config::{PHYS_END_ADDR, MMIO_RANGES, PAGE_SIZE, PROC_K_STACK_ADDR, TRAMPOLINE_ADDR, U_TRAMPOLINE_ADDR, TRAP_CONTEXT_ADDR, PROC_U_STACK_ADDR}, mem::{TrampolineSegment, UTrampolineSegment, TrapContextSegment, IdenticalMappingSegment, segment::SegmentFlags, VirtAddr, types::VPNRange, ManagedSegment, stat_mem, VMASegment}, fs::RegularFile, process::{get_processor, get_hart_id}};
+use crate::{utils::{ErrorNum}, config::{PHYS_END_ADDR, MMIO_RANGES, PAGE_SIZE, PROC_K_STACK_ADDR, TRAMPOLINE_ADDR, U_TRAMPOLINE_ADDR, TRAP_CONTEXT_ADDR, PROC_U_STACK_ADDR}, mem::{TrampolineSegment, UTrampolineSegment, TrapContextSegment, IdenticalMappingSegment, segment::{SegmentFlags, ProgramSegment}, VirtAddr, types::VPNRange, ManagedSegment, stat_mem, VMASegment, PageTableEntry}, fs::RegularFile, process::{get_processor, get_hart_id}};
 use super::{PageTable, VirtPageNum, ProcKStackSegment, segment::ProcUStackSegment, ArcSegment};
 
 use crate::utils::elf_rs_wrapper::read_elf;
@@ -42,7 +42,7 @@ impl MemLayout {
         layout.register_segment(UTrampolineSegment::new());
         // trap_context
         verbose!("Registering TrapContext...");
-        layout.register_segment(TrapContextSegment::new(None));
+        layout.register_segment(TrapContextSegment::new());
         // // text
         // verbose!("Registering Kernel text...");
         // layout.register_segment(
@@ -319,30 +319,30 @@ impl MemLayout {
                     seg_flag = seg_flag | SegmentFlags::W;
                 }
 
-                // TODO: new segment type with lazy program loading
-
-                let segment = ManagedSegment::new(
-                    VPNRange::new(seg_start, seg_end), 
-                    SegmentFlags::W | SegmentFlags::R, 
-                    p.memsz() as usize
-                );
-                self.register_segment(segment.clone());
-                self.do_map();
-                // copy data into it
-                let src = unsafe{ buffer.as_ptr().add(p.offset() as usize)};
-                let dst = VirtAddr::from(seg_start).0 as *mut u8;
-                let len = p.filesz() as usize;
-                unsafe{core::ptr::copy_nonoverlapping(src, dst, len)}
-                segment.as_managed()?.alter_permission(seg_flag, &mut self.pagetable);
-                
-                // let segment = VMASegment::new_at(
-                //     seg_start, 
-                //     elf_file.clone(), 
-                //     seg_flag, 
-                //     p.offset() as usize, 
+                // let segment = ManagedSegment::new(
+                //     VPNRange::new(seg_start, seg_end), 
+                //     SegmentFlags::W | SegmentFlags::R, 
                 //     p.memsz() as usize
-                // ).unwrap();
-                // self.register_segment(segment);
+                // );
+                // self.register_segment(segment.clone());
+                // self.do_map();
+                // // copy data into it
+                // let src = unsafe{ buffer.as_ptr().add(p.offset() as usize)};
+                // let dst = VirtAddr::from(seg_start).0 as *mut u8;
+                // let len = p.filesz() as usize;
+                // unsafe{core::ptr::copy_nonoverlapping(src, dst, len)}
+                // segment.as_managed()?.alter_permission(seg_flag, &mut self.pagetable);
+
+
+                let segment = ProgramSegment::new_at(
+                    seg_start, 
+                    elf_file.clone(), 
+                    seg_flag, 
+                    p.offset() as usize, 
+                    p.filesz() as usize,
+                    p.memsz() as usize
+                ).unwrap();
+                self.register_segment(segment);
             }
         }
         let entry_point = elf.entry_point() as usize;
@@ -367,6 +367,7 @@ impl MemLayout {
             layout.register_segment(seg.clone_seg(&mut self.pagetable)?);
         }
         layout.do_map();
+        unsafe { asm!("sfence.vma"); }
         Ok(layout)
     }
 

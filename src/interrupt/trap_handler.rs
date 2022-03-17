@@ -262,8 +262,8 @@ pub fn fork_return() -> ! {
         let processor = get_processor();
         let pcb = processor.current().unwrap();
         let mut pcb_inner = unsafe {pcb.inner.from_locked()};   // this was locked in scheduler ( run() ), so it's safe to claim it here
+        let trap_context = TrapContext::current_ref();
         if pcb_inner.status == ProcessStatus::Init {
-            let trap_context = TrapContext::current_ref();
             let elf_file = pcb_inner.elf_file.clone();
             (pcb_inner.entry_point, pcb_inner.data_end) = pcb_inner.mem_layout.map_elf(elf_file).unwrap();
             pcb_inner.status = ProcessStatus::Running;
@@ -271,6 +271,8 @@ pub fn fork_return() -> ! {
             trap_context.epc = pcb_inner.entry_point;
             trap_context.sp = (PROC_U_STACK_ADDR + PROC_U_STACK_SIZE).0;
             debug!("Initialized PCB with entry_point @ {:?}", pcb_inner.entry_point);
+        } else {
+            info!("First entry to U mode. a0 = {}, a1 = {}, ra {:x}", trap_context.a0, trap_context.a1, trap_context.ra);
         }
     }
     trap_return();
