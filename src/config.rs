@@ -9,12 +9,14 @@ pub const UART0_IRQ			: u32 = 10;
 pub const CLINT_ADDR		: PhysAddr = PhysAddr(0x02000000);
 pub const PLIC_ADDR			: PhysAddr = PhysAddr(0x0C000000);
 pub const UART0_ADDR		: PhysAddr = PhysAddr(0x10000000);
+pub const RTC_ADDR          : PhysAddr = PhysAddr(0x00101000);
 pub const PHYS_END_ADDR		: PhysAddr = PhysAddr(0x1_0000_0000);
 pub const PHYS_START_ADDR	: PhysAddr = PhysAddr(0x8000_0000);
 pub const MMIO_RANGES       : &[(usize, usize)] = &[
     (0x0200_0000, 0x0201_0000),     /* CLint     */
-    (0x0C00_0000, 0x1000_0000),     /* PLIC      */
     (0x1000_0000, 0x1000_1000),     /* UART      */ 
+    (0x0C00_0000, 0x1000_0000),     /* PLIC      */
+    (0x0010_1000, 0x0010_2000),     /* RTC       */
 ];
 
 pub const TRAMPOLINE_ADDR   : VirtAddr = VirtAddr(usize::MAX - PAGE_SIZE + 1);

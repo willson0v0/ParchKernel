@@ -1,6 +1,7 @@
 mod trap_handler;
 mod plic;
 mod clint;
+pub mod int_callback;
 pub mod trap_context;
 
 pub use plic::PLIC0;

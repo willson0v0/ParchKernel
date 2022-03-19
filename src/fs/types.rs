@@ -48,6 +48,10 @@ impl Permission {
     pub fn default() -> Self {
         Self::OWNER_R | Self::OWNER_W | Self::GROUP_R | Self::OTHER_R
     }
+
+    pub fn ro() -> Self {
+        Self::OWNER_R | Self::GROUP_R | Self::OTHER_R
+    }
 }
 
 enum_with_tryfrom_u16!(

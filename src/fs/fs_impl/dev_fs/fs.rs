@@ -1,10 +1,10 @@
-use crate::{fs::{VirtualFileSystem, Path, File, DirFile, types::{FileStat, Permission}, OpenMode, Dirent, DummyLink}, utils::{ErrorNum, UUID}};
+use crate::{fs::{VirtualFileSystem, Path, File, DirFile, types::{FileStat, Permission}, OpenMode, Dirent, DummyLink}, utils::{ErrorNum, UUID}, config::RTC_ADDR};
 use core::fmt::Debug;
 
 use alloc::{sync::Arc, string::{ToString, String}};
 use lazy_static::*;
 
-use super::UartPTS;
+use super::{UartPTS, drivers::GoldFishRTC};
 
 lazy_static!{
     pub static ref DEV_FS: Arc<DevFS> = {
@@ -127,6 +127,8 @@ impl DirFile for DevFolder {
     fn open_entry(&self, entry_name: &String, mode: crate::fs::OpenMode) -> Result<Arc<dyn File>, ErrorNum> {
         if entry_name == "pts" {
             Ok(Arc::new(UartPTS{mode}))
+        } else if entry_name == "rtc0" {
+            Ok(Arc::new(GoldFishRTC::new(RTC_ADDR)))
         } else if entry_name == "." {
             Ok(Arc::new(DummyLink{
                 vfs: DEV_FS.clone(),
@@ -157,6 +159,7 @@ impl DirFile for DevFolder {
             Dirent{ inode: 0, permission: Permission::default(), f_type: crate::fs::types::FileType::LINK, f_name: ".".to_string() },
             Dirent{ inode: 0, permission: Permission::default(), f_type: crate::fs::types::FileType::LINK, f_name: "..".to_string() },
             Dirent{ inode: 0, permission: Permission::default(), f_type: crate::fs::types::FileType::CHAR, f_name: "pts".to_string() },
+            Dirent{ inode: 0, permission: Permission::ro(), f_type: crate::fs::types::FileType::CHAR, f_name: "rtc0".to_string() },
         ])
     }
 

@@ -2,7 +2,7 @@ use core::{arch::asm};
 
 use alloc::{vec::Vec, sync::Arc, borrow::ToOwned, string::String};
 use riscv::register::{satp};
-use crate::{utils::{ErrorNum}, config::{PHYS_END_ADDR, MMIO_RANGES, PAGE_SIZE, PROC_K_STACK_ADDR, TRAMPOLINE_ADDR, U_TRAMPOLINE_ADDR, TRAP_CONTEXT_ADDR, PROC_U_STACK_ADDR}, mem::{TrampolineSegment, UTrampolineSegment, TrapContextSegment, IdenticalMappingSegment, segment::{SegmentFlags, ProgramSegment}, VirtAddr, types::VPNRange, ManagedSegment, stat_mem, VMASegment, PageTableEntry}, fs::RegularFile, process::{get_processor, get_hart_id}};
+use crate::{utils::{ErrorNum}, config::{PHYS_END_ADDR, MMIO_RANGES, PAGE_SIZE, PROC_K_STACK_ADDR, TRAMPOLINE_ADDR, U_TRAMPOLINE_ADDR, TRAP_CONTEXT_ADDR, PROC_U_STACK_ADDR}, mem::{TrampolineSegment, UTrampolineSegment, TrapContextSegment, IdenticalMappingSegment, segment::{SegmentFlags, ProgramSegment}, VirtAddr, types::VPNRange, ManagedSegment, stat_mem, VMASegment, PageTableEntry, Segment}, fs::RegularFile, process::{get_processor, get_hart_id}};
 use super::{PageTable, VirtPageNum, ProcKStackSegment, segment::ProcUStackSegment, ArcSegment};
 
 use crate::utils::elf_rs_wrapper::read_elf;
@@ -120,44 +120,42 @@ impl MemLayout {
     }
 
     pub fn reset(&mut self) -> Result<(), ErrorNum> {
-        verbose!("Resetting memory layout...");
-        extern "C" {
-            fn stext();
-            fn srodata();
-            fn sdata();
-            fn sbss_with_stack();
-            fn ekernel();
-        }
-        let mut basic = Vec::new();
-        basic.push(TRAMPOLINE_ADDR  );
-        basic.push(U_TRAMPOLINE_ADDR);
-        basic.push(TRAP_CONTEXT_ADDR);
-        basic.push(PROC_K_STACK_ADDR);
-        basic.push(PROC_U_STACK_ADDR);
-        basic.push(VirtAddr::from(stext as usize).into());
-        basic.push(VirtAddr::from(srodata as usize).into());
-        basic.push(VirtAddr::from(sdata as usize).into());
-        basic.push(VirtAddr::from(sbss_with_stack as usize).into());
-        basic.push(VirtAddr::from(ekernel as usize).into());
+        // verbose!("Resetting memory layout...");
+        // extern "C" {
+        //     fn stext();
+        //     fn srodata();
+        //     fn sdata();
+        //     fn sbss_with_stack();
+        //     fn ekernel();
+        // }
+        // let mut basic = Vec::new();
+        // basic.push(TRAMPOLINE_ADDR  );
+        // basic.push(U_TRAMPOLINE_ADDR);
+        // basic.push(TRAP_CONTEXT_ADDR);
+        // basic.push(PROC_K_STACK_ADDR);
+        // basic.push(PROC_U_STACK_ADDR);
+        // basic.push(VirtAddr::from(stext as usize).into());
+        // basic.push(VirtAddr::from(srodata as usize).into());
+        // basic.push(VirtAddr::from(sdata as usize).into());
+        // basic.push(VirtAddr::from(sbss_with_stack as usize).into());
+        // basic.push(VirtAddr::from(ekernel as usize).into());
 
-        for (start, _) in MMIO_RANGES {
-            basic.push(VirtAddr::from(*start).into());
-        }
+        // for (start, _) in MMIO_RANGES {
+        //     basic.push(VirtAddr::from(*start).into());
+        // }
 
-        let basic = basic.into_iter().map(|va| VirtPageNum::from(va)).collect::<Vec<VirtPageNum>>();
+        // let basic = basic.into_iter().map(|va| VirtPageNum::from(va)).collect::<Vec<VirtPageNum>>();
 
         let mut to_clear = Vec::new();
         for seg in self.segments.iter() {
             verbose!("reset checking {:?}...", seg);
-            let mut important = false;
-            for addr in basic.iter() {
-                if seg.contains(addr.to_owned()) {
-                    important = true;
-                    verbose!("{:?} is important for containing {:?}", seg, addr);
-                    break;
-                }
+            if seg.clone().as_program().is_ok() {
+                to_clear.push(seg.clone());
             }
-            if !important {
+            if seg.clone().as_vma().is_ok() {
+                to_clear.push(seg.clone());
+            }
+            if seg.clone().as_managed().is_ok() {
                 to_clear.push(seg.clone());
             }
         }

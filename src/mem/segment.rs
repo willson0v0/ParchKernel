@@ -383,10 +383,12 @@ impl Segment for ManagedSegment {
     fn do_unmap(&self, pagetable: &mut PageTable) -> Result<(), ErrorNum> {
         let mut inner = self.0.acquire();
         assert!(inner.status == SegmentStatus::Mapped);
-        for vpn in inner.range {
-            // not dropping pageguards, for lazy cow.
-            // inner.frames.remove(&vpn).unwrap();
-            pagetable.unmap(vpn);
+        for (vpn, pg) in inner.frames.iter() {
+            match pg {
+                PageGuardSlot::Populated(_) |
+                PageGuardSlot::CopyOnWrite(_) => pagetable.unmap(*vpn),
+                _ => {/* nothing */}
+            }
         }
         inner.status = SegmentStatus::Zombie;
         Ok(())
@@ -509,8 +511,12 @@ impl Segment for VMASegment {
             return Err(ErrorNum::ENOSEG);
         }
         assert!(inner.status == SegmentStatus::Mapped);
-        for (vpn, _pg) in &inner.frames {
-            pagetable.unmap(*vpn);
+        for (vpn, pg) in inner.frames.iter() {
+            match pg {
+                PageGuardSlot::Populated(_) |
+                PageGuardSlot::CopyOnWrite(_) => pagetable.unmap(*vpn),
+                _ => {/* nothing */}
+            }
         }
         inner.frames.clear();
         inner.status = SegmentStatus::Zombie;
@@ -895,14 +901,13 @@ impl Segment for ProcUStackSegment {
 
     fn do_unmap(&self, pagetable: &mut PageTable) -> Result<(), ErrorNum> {
         let mut inner = self.0.acquire();
-        let page_count = PROC_U_STACK_SIZE / PAGE_SIZE;
-        let start_vpn: VirtPageNum = PROC_U_STACK_ADDR.into();
-        for i in 0..page_count {
-            pagetable.unmap(start_vpn + i);
+        for (vpn, pg) in inner.frames.iter() {
+            match pg {
+                PageGuardSlot::Populated(_) |
+                PageGuardSlot::CopyOnWrite(_) => pagetable.unmap(*vpn),
+                _ => {/* nothing */}
+            }
         }
-        inner.frames = inner.frames.iter().map(|(vpn, slot)| -> (VirtPageNum, PageGuardSlot) {
-            (*vpn, PageGuardSlot::Unmapped)
-        }).collect();
         inner.status = SegmentStatus::Zombie;
         Ok(())
     }
@@ -1020,8 +1025,12 @@ impl Segment for ProgramSegment {
             return Err(ErrorNum::ENOSEG);
         }
         assert!(inner.status == SegmentStatus::Mapped);
-        for (vpn, _pg) in &inner.frames {
-            pagetable.unmap(*vpn);
+        for (vpn, pg) in &inner.frames {
+            match pg {
+                PageGuardSlot::Populated(_) |
+                PageGuardSlot::CopyOnWrite(_) => pagetable.unmap(*vpn),
+                _ => {/* nothing */}
+            }
         }
         inner.frames.clear();
         inner.status = SegmentStatus::Zombie;
