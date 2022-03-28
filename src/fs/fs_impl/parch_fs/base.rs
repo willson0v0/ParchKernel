@@ -10,7 +10,6 @@ use alloc::vec::Vec;
 pub struct PFSBase {
     pub inode_no: INodeNo,
     pub open_mode: OpenMode,
-    pub mmap_start: Option<VirtPageNum>,
     pub fs: Weak<ParchFS>,
     pub path: Path
 }
@@ -19,7 +18,6 @@ impl PFSBase {
     pub fn new(inode_no: INodeNo, path: Path, open_mode: OpenMode, fs: Weak<ParchFS>) -> Result<Self, ErrorNum> {
         Ok(Self {
             inode_no,
-            mmap_start: None,
             open_mode,
             fs,
             path
@@ -261,35 +259,30 @@ impl PFSBase {
         if inode.f_size < offset + data.len() {
             self.expand_locked(offset + data.len(), &mut fs_inner, &mut inode)?;
         }
-        if let Some(mmap_start) = self.mmap_start {
-            let start_va = VirtAddr::from(mmap_start) + offset;
-            unsafe{start_va.write_data(data)};
-            Ok(())
-        } else {
-            let length = data.len();
-            let target = length + offset;
-            let mut data_ptr = 0;
-            while offset < target {
-                let blk = self.get_blockno_locked(offset, false, &mut fs_inner, &mut inode)?;
-                let pa = ParchFS::blockno_2_pa(blk);
-                // offset to pa
-                let dst_start = offset % BLK_SIZE;
-                let dst_end = if target > offset + (BLK_SIZE - dst_start) {
-                    BLK_SIZE
-                } else {
-                    target % BLK_SIZE
-                };
-                let cpy_size = dst_end - dst_start;
+        let length = data.len();
+        let target = length + offset;
+        let mut data_ptr = 0;
+        while offset < target {
+            let blk = self.get_blockno_locked(offset, false, &mut fs_inner, &mut inode)?;
+            let pa = ParchFS::blockno_2_pa(blk);
+            // offset to pa
+            let dst_start = offset % BLK_SIZE;
+            let dst_end = if target > offset + (BLK_SIZE - dst_start) {
+                BLK_SIZE
+            } else {
+                target % BLK_SIZE
+            };
+            let cpy_size = dst_end - dst_start;
 
-                let src_start = data_ptr;
-                let src_end = src_start + cpy_size;
+            let src_start = data_ptr;
+            let src_end = src_start + cpy_size;
 
-                unsafe{&(pa + dst_start).write_data(data[src_start..src_end].to_vec())};
-                offset += cpy_size;
-                data_ptr += cpy_size;
-            }
-            Ok(())
+            unsafe{&(pa + dst_start).write_data(data[src_start..src_end].to_vec())};
+            offset += cpy_size;
+            data_ptr += cpy_size;
         }
+        Ok(())
+        
     }
 
     pub fn read(&self, mut length: usize, offset: Cursor) -> Result<alloc::vec::Vec<u8>, crate::utils::ErrorNum> {
@@ -310,31 +303,24 @@ impl PFSBase {
         }
 
         if length == 0 {return Ok(Vec::new())}
-        
-        if let Some(mmap_start) = self.mmap_start {
-            unsafe {
-                Ok((VirtAddr::from(mmap_start) + offset).read_data(length))
-            }
-        } else {
-            let _fs = self.fs.upgrade().unwrap();
-            let mut result: Vec<u8> = Vec::new();
-            let target = length + offset;
-            while offset < target {
-                let blk = self.get_blockno_locked(offset, false, &mut fs_inner, &mut inode)?;
-                let pa = ParchFS::blockno_2_pa(blk);
+        let mut result: Vec<u8> = Vec::new();
+        let target = length + offset;
+        while offset < target {
+            let blk = self.get_blockno_locked(offset, false, &mut fs_inner, &mut inode)?;
+            let pa = ParchFS::blockno_2_pa(blk);
 
-                let cpy_start = offset % BLK_SIZE;
-                let cpy_end = if target > offset + (BLK_SIZE - cpy_start) {
-                    BLK_SIZE
-                } else {
-                    target % BLK_SIZE
-                };
-                let cpy_size = cpy_end - cpy_start;
-                result.append(&mut unsafe{(pa + cpy_start).read_data(cpy_size).clone()});
-                offset += cpy_size;
-            }
-            Ok(result)
+            let cpy_start = offset % BLK_SIZE;
+            let cpy_end = if target > offset + (BLK_SIZE - cpy_start) {
+                BLK_SIZE
+            } else {
+                target % BLK_SIZE
+            };
+            let cpy_size = cpy_end - cpy_start;
+            result.append(&mut unsafe{(pa + cpy_start).read_data(cpy_size).clone()});
+            offset += cpy_size;
         }
+        Ok(result)
+        
     }
 
     pub fn vfs(&self) -> Arc<dyn crate::fs::VirtualFileSystem> {
@@ -356,7 +342,7 @@ impl PFSBase {
         })
     }
     
-    pub fn get_page(&self, offset: usize) -> Result<PageGuard, ErrorNum> {
+    pub fn copy_page(&self, offset: usize) -> Result<PageGuard, ErrorNum> {
         let result = alloc_vm_page();
         if offset % BLK_SIZE != 0 {
             let offset_nxt = offset + (BLK_SIZE - (offset % BLK_SIZE));
@@ -384,6 +370,12 @@ impl PFSBase {
             unsafe {PhysPageNum::copy_page(&block_ppn,&result.ppn);}
         }
         Ok(result)
+    }
+
+    pub fn get_page(&self, offset: usize) -> Result<PageGuard, ErrorNum> {
+        let block_no = self.get_blockno(offset, false)?;
+        let block_ppn = ParchFS::blockno_2_ppn(block_no);
+        Ok(claim_fs_page(block_ppn))
     }
 
     pub fn get_mount_uuid(&self) -> Result<UUID, ErrorNum> {

@@ -12,7 +12,7 @@ use lazy_static::*;
 use crate::config::{MAX_CPUS, PROC_K_STACK_ADDR, PROC_K_STACK_SIZE};
 use crate::fs::RegularFile;
 use crate::interrupt::{fork_return};
-use crate::mem::{MemLayout, VirtPageNum};
+use crate::mem::{MemLayout, VirtPageNum, MMAPType};
 use crate::process::ProcessControlBlock;
 use crate::process::pcb::ProcessStatus;
 use crate::utils::{MutexGuard, ErrorNum};
@@ -178,12 +178,7 @@ impl Processor {
     }
 
     pub fn map_file(&self, file: Arc<dyn RegularFile>) -> VirtPageNum {
-        let mut layout_guard = self.mem_layout.borrow_mut();
-        let layout = layout_guard.as_mut().unwrap();
-        let length = file.stat().unwrap().file_size;
-        let res = file.register_mmap(layout, 0, length).unwrap();
-        layout.do_map();
-        res
+        self.mem_layout.borrow_mut().as_mut().unwrap().mmap_file(file.clone(), 0, file.stat().unwrap().file_size, MMAPType::Private).unwrap()
     }
 
     pub fn unmap_file(&self, start_vpn: VirtPageNum) {

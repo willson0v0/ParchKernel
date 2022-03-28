@@ -13,9 +13,6 @@ use crate::{fs::{RegularFile}, utils::ErrorNum, config::{TRAMPOLINE_ADDR, U_TRAM
 use super::{VirtAddr, PageTableEntry};
 use super::{types::{VPNRange, VirtPageNum, PhysPageNum}, PageGuard, pagetable::{PageTable, PTEFlags}, alloc_vm_page, PhysAddr};
 
-
-// TODO: assert !w on all cow
-
 bitflags! {
     /// Segment flags indicaing privilege.
     pub struct SegmentFlags: usize {
@@ -28,6 +25,12 @@ bitflags! {
         /// Can this segment be accessed from user mode?
         const U = 1 << 4;
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MMAPType {
+    Shared,
+    Private
 }
 
 impl Into<PTEFlags> for SegmentFlags {
@@ -59,7 +62,8 @@ pub enum PageGuardSlot {
     LazyAlloc,
     Populated(PageGuard),
     CopyOnWrite(PageGuard),
-    LazyVMA((Arc<dyn RegularFile>, usize)),    // file & offset // TODO: change this to Arc<dyn File>, for we might be able to mmap device file.
+    LazyVMAPrivate((Arc<dyn RegularFile>, usize)),    // file & offset // TODO: change this to Arc<dyn File>, for we might be able to mmap device file.
+    LazyVMAShared((Arc<dyn RegularFile>, usize)),    // file & offset // TODO: change this to Arc<dyn File>, for we might be able to mmap device file.
 }
 
 impl PageGuardSlot {
@@ -191,6 +195,7 @@ pub struct VMASegmentInner {
     flag: SegmentFlags,
     status: SegmentStatus,
     start_vpn: VirtPageNum,
+    mmap_type: MMAPType,
     // file_offset: usize,  /* file_offset in page */
     // length: usize,  /* length in page */
 }
@@ -418,7 +423,9 @@ impl Segment for ManagedSegment {
                     PageGuardSlot::CopyOnWrite(content.clone())
                 },
                 PageGuardSlot::CopyOnWrite(content) => PageGuardSlot::CopyOnWrite(content.clone()),
-                PageGuardSlot::LazyVMA(_) => panic!("no vma in managed."),
+                PageGuardSlot::LazyVMAPrivate(_) |
+                PageGuardSlot::LazyVMAShared(_)
+                    => panic!("no vma in managed."),
             };
             (*vpn, new_slot)
         }).collect();
@@ -545,7 +552,7 @@ impl Segment for VMASegment {
                     pagetable.remap(*vpn, content.ppn, (inner.flag & SegmentFlags::W.complement()).into()); // disable write to trigger cow
                     PageGuardSlot::CopyOnWrite(content.clone())
                 },
-                PageGuardSlot::LazyVMA((file, offset)) =>  PageGuardSlot::LazyVMA((file.clone(), *offset)),
+                PageGuardSlot::LazyVMAPrivate((file, offset)) =>  PageGuardSlot::LazyVMAPrivate((file.clone(), *offset)),
                 PageGuardSlot::LazyAlloc =>  PageGuardSlot::LazyAlloc,
                 _ => panic!("Bad slot type in vma")
             };
@@ -560,6 +567,7 @@ impl Segment for VMASegment {
             flag: inner.flag,
             status: SegmentStatus::Initialized,
             start_vpn: inner.start_vpn,
+            mmap_type: inner.mmap_type,
         }));
 
         Ok(Arc::new(res).as_segment().into())
@@ -601,7 +609,13 @@ impl Segment for VMASegment {
                     };
                     pagetable.remap(vpn, tgt_page.ppn, inner.flag.into())
                 },
-                PageGuardSlot::LazyVMA((file, offset)) => {
+                PageGuardSlot::LazyVMAPrivate((file, offset)) => {
+                    verbose!("lazy vma triggered.");
+                    let pg = file.copy_page(offset)?;
+                    pagetable.map(vpn, pg.ppn, inner.flag.into());
+                    inner.frames.insert(vpn, PageGuardSlot::Populated(pg));
+                },
+                PageGuardSlot::LazyVMAShared((file, offset)) => {
                     verbose!("lazy vma triggered.");
                     let pg = file.get_page(offset)?;
                     pagetable.map(vpn, pg.ppn, inner.flag.into());
@@ -983,7 +997,7 @@ impl Segment for ProcUStackSegment {
                     };
                     pagetable.do_map(vpn, tgt_page.ppn, PTEFlags::R | PTEFlags::W | PTEFlags::U);
                 },
-                PageGuardSlot::LazyVMA(_) => panic!("lazy vma in proc u stack"),
+                PageGuardSlot::LazyVMAPrivate(_) | PageGuardSlot::LazyVMAShared(_) => panic!("lazy vma in proc u stack"),
             }
             Ok(())
         } else {
@@ -1059,7 +1073,7 @@ impl Segment for ProgramSegment {
                     pagetable.remap(*vpn, content.ppn, (inner.flag & SegmentFlags::W.complement()).into()); // disable write to trigger cow
                     PageGuardSlot::CopyOnWrite(content.clone())
                 },
-                PageGuardSlot::LazyVMA((file, offset)) =>  PageGuardSlot::LazyVMA((file.clone(), *offset)),
+                PageGuardSlot::LazyVMAPrivate((file, offset)) =>  PageGuardSlot::LazyVMAPrivate((file.clone(), *offset)),
                 PageGuardSlot::LazyAlloc =>  PageGuardSlot::LazyAlloc,
                 _ => panic!("Bad slot type in vma")
             };
@@ -1119,11 +1133,14 @@ impl Segment for ProgramSegment {
                     };
                     pagetable.remap(vpn, tgt_page.ppn, inner.flag.into())
                 },
-                PageGuardSlot::LazyVMA((file, offset)) => {
+                PageGuardSlot::LazyVMAPrivate((file, offset)) => {
                     verbose!("lazy vma triggered.");
-                    let pg = file.get_page(offset)?;
+                    let pg = file.copy_page(offset)?;
                     pagetable.map(vpn, pg.ppn, inner.flag.into());
                     inner.frames.insert(vpn, PageGuardSlot::Populated(pg));
+                },
+                PageGuardSlot::LazyVMAShared(_) => {
+                    panic!("program segment cannot be mapped as shared mmap.")
                 },
             }
             Ok(())
@@ -1176,53 +1193,6 @@ impl ManagedSegment {
         original_flag
     }
 
-    // pub fn grow(&self, increment: usize, pagetable: &mut PageTable) -> Result<VirtAddr, ErrorNum> {
-    //     let mut inner = self.0.acquire();
-    //     let mut map_iter = inner.range.end();
-    //     let tgt_va: VirtAddr = VirtAddr::from(inner.range.start()) + inner.byte_len + increment;
-    //     info!("Growing managed segment, original end {:?}, original length {}, increment {}", inner.range.end(), inner.byte_len, increment);
-    //     while tgt_va.to_vpn_ceil() >= map_iter {
-    //         debug!("registering lazy vpn {:?}", map_iter);
-    //         // let pg = alloc_vm_page();
-    //         // let ppn = pg.ppn;
-    //         // pagetable.map(map_iter, ppn, inner.flag.into());
-    //         inner.frames.insert(map_iter, PageGuardSlot::LazyAlloc);
-    //         map_iter = map_iter + 1;
-    //     }
-    //     inner.byte_len = inner.byte_len + increment;
-    //     inner.range.end = map_iter;
-    //     info!("Grow done, new end {:?}, new length {}", inner.range.end(), inner.byte_len);
-    //     Ok(VirtAddr::from(inner.range.start()) + inner.byte_len)
-    // }
-
-    // pub fn shrink(&self, decrement: usize, pagetable: &mut PageTable) -> Result<VirtAddr, ErrorNum> {
-    //     let mut inner = self.0.acquire();
-    //     let mut map_iter = inner.range.end() - 1;
-    //     let tgt_va: VirtAddr = VirtAddr::from(inner.range.start()) + inner.byte_len - decrement;
-    //     info!("Shrinking managed segment, original end {:?}, decrement {}", inner.range.end(), decrement);
-    //     while tgt_va.to_vpn_ceil() < map_iter {
-    //         debug!("Unapping vpn {:?}", map_iter);
-    //         // remove pg
-    //         let slot = inner.frames.remove(&map_iter).unwrap();
-    //         match slot {
-    //             PageGuardSlot::LazyAlloc => { /* do nothing */ },
-    //             PageGuardSlot::Populated(_) => {
-    //                 pagetable.unmap(map_iter);
-    //             },
-    //             PageGuardSlot::CopyOnWrite(_) => {
-    //                 pagetable.unmap(map_iter);
-    //             },
-    //             _ => panic!("bad slot type"),
-    //         }
-    //         map_iter = map_iter - 1;
-    //     }
-    //     inner.byte_len = inner.byte_len - decrement;
-    //     inner.range.end = map_iter;
-    //     info!("Grow done, new end {:?}, new length {}", inner.range.end(), inner.byte_len);
-    //     Ok(VirtAddr::from(inner.range.start()) + inner.byte_len)
-
-    // }
-
     pub fn get_end_va(&self) -> VirtAddr {
         let inner = self.0.acquire();
         VirtAddr::from(inner.range.start()) + inner.byte_len
@@ -1231,7 +1201,7 @@ impl ManagedSegment {
 
 impl VMASegment {
     /// file_offset and length are in bytes
-    pub fn new_at(start_vpn: VirtPageNum, file: Arc<dyn RegularFile>, flag: SegmentFlags, file_offset: usize, length: usize) -> Result<ArcSegment, ErrorNum> {
+    pub fn new_at(start_vpn: VirtPageNum, file: Arc<dyn RegularFile>, flag: SegmentFlags, file_offset: usize, length: usize, mmap_type: MMAPType) -> Result<ArcSegment, ErrorNum> {
         let file_size = file.stat()?.file_size;
         let frames = VPNRange::new(
             start_vpn, 
@@ -1240,7 +1210,14 @@ impl VMASegment {
             .into_iter()
             .map(|vpn| -> (VirtPageNum, PageGuardSlot) {
                 let offset_to_file = file_offset + (vpn - start_vpn) * PAGE_SIZE;
-                (vpn, PageGuardSlot::LazyVMA((file.clone(), offset_to_file)))
+                if offset_to_file >= file_size {
+                    (vpn, PageGuardSlot::LazyAlloc)
+                } else {
+                    match mmap_type {
+                        MMAPType::Shared => (vpn, PageGuardSlot::LazyVMAShared((file.clone(), offset_to_file))),
+                        MMAPType::Private => (vpn, PageGuardSlot::LazyVMAPrivate((file.clone(), offset_to_file))),
+                    }
+                }
             })
             .collect();
         let res = VMASegmentInner {
@@ -1248,8 +1225,33 @@ impl VMASegment {
             flag,
             status: SegmentStatus::Initialized,
             start_vpn,
+            mmap_type
         };
         Ok(Arc::new(VMASegment(SpinMutex::new("Segment lock", res))).as_segment().into())
+    }
+    
+    pub fn unmap_part(&self, start_va: VirtAddr, length: usize, pagetable: &mut PageTable) -> Result<(), ErrorNum> {
+        let end_va = start_va + length;
+        let start_vpn: VirtPageNum = start_va.to_vpn_ceil();
+        let end_vpn: VirtPageNum = end_va.into();
+        let mut inner = self.0.acquire();
+        for vpn in VPNRange::new(start_vpn, end_vpn) {
+            if let Some(pgs) = inner.frames.insert(vpn, PageGuardSlot::Unmapped) {
+                match pgs {
+                    PageGuardSlot::CopyOnWrite(_) |
+                    PageGuardSlot::Populated(_) => {
+                        pagetable.unmap(vpn);
+                    },
+                    _ => {
+                        // do nothing since not mapped
+                    },
+                }
+            } else {
+                inner.frames.remove(&vpn).unwrap();
+                return Err(ErrorNum::EACCES);
+            }
+        }
+        Ok(())
     }
 }
 
@@ -1302,7 +1304,7 @@ impl ProgramSegment {
             if offset >= file_length {
                 frames.insert(vpn, PageGuardSlot::LazyAlloc);
             } else {
-                frames.insert(vpn, PageGuardSlot::LazyVMA((file.clone(), file_offset + offset)));
+                frames.insert(vpn, PageGuardSlot::LazyVMAPrivate((file.clone(), file_offset + offset)));
             }
         }
         let res = ProgramSegmentInner {
@@ -1339,5 +1341,29 @@ impl ProgramSegment {
             inner.mem_length = (inner.mem_length as isize - alteration) as usize;
         }
         Ok(inner.mem_length)
+    }
+
+    pub fn unmap_part(&self, start_va: VirtAddr, length: usize, pagetable: &mut PageTable) -> Result<(), ErrorNum> {
+        let end_va = start_va + length;
+        let start_vpn: VirtPageNum = start_va.to_vpn_ceil();
+        let end_vpn: VirtPageNum = end_va.into();
+        let mut inner = self.0.acquire();
+        for vpn in VPNRange::new(start_vpn, end_vpn) {
+            if let Some(pgs) = inner.frames.insert(vpn, PageGuardSlot::Unmapped) {
+                match pgs {
+                    PageGuardSlot::CopyOnWrite(_)|
+                    PageGuardSlot::Populated(_) => {
+                        pagetable.unmap(vpn);
+                    },
+                    _ => {
+                        // do nothing since not mapped
+                    },
+                }
+            } else {
+                inner.frames.remove(&vpn).unwrap();
+                return Err(ErrorNum::EACCES);
+            }
+        }
+        Ok(())
     }
 }

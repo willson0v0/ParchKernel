@@ -128,12 +128,8 @@ impl PageAllocator for BitMapPageAllocator {
     }
 
     fn alloc(&mut self, is_exec: bool) -> Option<PhysPageNum> {
-		let empty = if is_exec {
-			self.bitmap_mm.first_empty()?
-		} else {
-			self.bitmap_fs.first_empty()?
-		};
-		assert!(!self.bitmap_mm.get(empty), "Double alloc");
+		let empty = self.bitmap_mm.first_empty()?;	// always alloc from mm, for mm contains fs
+		assert!(!self.bitmap_mm.get(empty), "Double alloc for page {} when is exec = {}", empty, is_exec);
 		
 		let ppn = PhysPageNum::from(PhysAddr::from(BASE_ADDRESS as usize)) + empty;
 		// verbose!("Alloced: {:?}", ppn);

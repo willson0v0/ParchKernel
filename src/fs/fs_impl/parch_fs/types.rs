@@ -273,31 +273,12 @@ impl File for PFSRegular {
 }
 
 impl RegularFile for PFSRegular {
-    fn get_page(&self, offset: usize) -> Result<crate::mem::PageGuard, crate::utils::ErrorNum> {
-        self.0.acquire().base.get_page(offset)
+    fn copy_page(&self, offset: usize) -> Result<crate::mem::PageGuard, crate::utils::ErrorNum> {
+        self.0.acquire().base.copy_page(offset)
     }
 
-    fn register_mmap(self: Arc<Self>, mem_layout: &mut crate::mem::MemLayout, offset: usize, length: usize) -> Result<crate::mem::VirtPageNum, ErrorNum> {
-        if offset % PAGE_SIZE != 0 {
-            return Err(ErrorNum::ENOTALIGNED);
-        }
-        let mut inner = self.0.acquire();
-        if let Some(start_vpn) = inner.base.mmap_start {
-            // TODO: multiple vma for one file
-            return Ok(start_vpn);   
-        }
-        let stat = inner.base.stat()?;
-        let start_vpn = mem_layout.get_space(stat.file_size)?;
-        inner.base.mmap_start = Some(start_vpn);
-        drop(inner);
-        mem_layout.register_segment(VMASegment::new_at(
-            start_vpn,
-            self.clone(),
-            stat.open_mode.into(),
-            offset,
-            length
-        )?);
-        Ok(start_vpn)
+    fn get_page(&self, offset: usize) -> Result<crate::mem::PageGuard, crate::utils::ErrorNum> {
+        self.0.acquire().base.get_page(offset)
     }
 }
 

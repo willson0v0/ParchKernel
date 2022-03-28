@@ -169,8 +169,7 @@ impl VirtualFileSystem for ParchFS {
         Ok(Arc::new(PFSDir(SpinMutex::new("PFSFile", PFSDirInner{
             base: PFSBase { 
                 inode_no: self.inner.acquire().superblock.root_inode.into(), 
-                open_mode, 
-                mmap_start: None, 
+                open_mode,
                 fs: Arc::downgrade(&PARCH_FS.clone()), 
                 path: "/".into() 
             }

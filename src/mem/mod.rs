@@ -36,6 +36,7 @@ pub use page_allocator::{
 };
 
 pub use segment::{
+    MMAPType,
     Segment,
     ArcSegment,
     IdenticalMappingSegment,

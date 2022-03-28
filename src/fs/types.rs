@@ -109,8 +109,12 @@ pub trait LinkFile      : File {
     fn write_link(&self, path: &Path) -> Result<(), ErrorNum>;
 }
 pub trait RegularFile   : File {
+    /// alloc a page and copy into it.
+    fn copy_page(&self, offset: usize) -> Result<PageGuard, ErrorNum>;
+    /// get the original page, fail if not aligned.
     fn get_page(&self, offset: usize) -> Result<PageGuard, ErrorNum>;
-    fn register_mmap(self: Arc<Self>, mem_layout: &mut MemLayout, offset: usize, length: usize) -> Result<VirtPageNum, ErrorNum>;
+    
+    // fn register_mmap(self: Arc<Self>, mem_layout: &mut MemLayout, offset: usize, length: usize) -> Result<VirtPageNum, ErrorNum>;
 }
 pub trait BlockFile     : File {}
 pub trait DirFile       : File {

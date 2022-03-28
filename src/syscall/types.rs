@@ -22,6 +22,8 @@ bitflags! {
     pub struct MMAPFlag: usize {
         const FIXED       = 0x10;
         const ANONYMOUS   = 0x20;
+        const PRIVATE     = 0x40;
+        const SHARED      = 0x80;
     }
 }
 

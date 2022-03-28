@@ -3,7 +3,7 @@ use core::{arch::asm};
 use alloc::{vec::Vec, sync::Arc, borrow::ToOwned, string::String};
 use riscv::register::{satp};
 use crate::{utils::{ErrorNum}, config::{PHYS_END_ADDR, MMIO_RANGES, PAGE_SIZE, PROC_K_STACK_ADDR, TRAMPOLINE_ADDR, U_TRAMPOLINE_ADDR, TRAP_CONTEXT_ADDR, PROC_U_STACK_ADDR}, mem::{TrampolineSegment, UTrampolineSegment, TrapContextSegment, IdenticalMappingSegment, segment::{SegmentFlags, ProgramSegment}, VirtAddr, types::VPNRange, ManagedSegment, stat_mem, VMASegment, PageTableEntry, Segment}, fs::RegularFile, process::{get_processor, get_hart_id}};
-use super::{PageTable, VirtPageNum, ProcKStackSegment, segment::ProcUStackSegment, ArcSegment};
+use super::{PageTable, VirtPageNum, ProcKStackSegment, segment::ProcUStackSegment, ArcSegment, MMAPType};
 
 use crate::utils::elf_rs_wrapper::read_elf;
 use elf_rs::*;
@@ -14,6 +14,7 @@ pub struct MemLayout {
     pub pagetable: PageTable,
     pub segments: Vec<ArcSegment>
 }
+
 
 impl MemLayout {
     pub fn new() -> Self {
@@ -263,6 +264,23 @@ impl MemLayout {
         }
     }
 
+    pub fn mmap_file(&mut self, file: Arc<dyn RegularFile>, offset: usize, length: usize, mmap_type: MMAPType) -> Result<VirtPageNum, ErrorNum> {
+        if mmap_type == MMAPType::Shared && offset % PAGE_SIZE == 0 {
+            return Err(ErrorNum::ENOTALIGNED);
+        }
+        let stat = file.stat()?;
+        let start_vpn = self.get_space(stat.file_size)?;
+        self.register_segment(VMASegment::new_at(
+            start_vpn,
+            file.clone(),
+            stat.open_mode.into(),
+            offset,
+            length,
+            mmap_type
+        )?);
+        Ok(start_vpn)
+    }
+
     pub fn map_elf(&mut self, elf_file: Arc<dyn RegularFile>) -> Result<(VirtAddr, VirtAddr), ErrorNum> {
         verbose!("Mapping elf into memory space");
         // first map it for easy reading...
@@ -270,7 +288,8 @@ impl MemLayout {
         let first_map = if get_processor().current().is_none() {
             get_processor().map_file(elf_file.clone())
         } else {
-            let res = elf_file.clone().register_mmap(self, 0, elf_file.stat()?.file_size)?;
+            // a little bit faster without copying.
+            let res = self.mmap_file(elf_file.clone(), 0, stat.file_size, MMAPType::Private)?;
             self.do_map();
             res
         };

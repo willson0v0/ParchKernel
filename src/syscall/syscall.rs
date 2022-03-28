@@ -2,7 +2,7 @@ use core::{mem::size_of};
 
 use alloc::{vec::Vec, sync::Arc, collections::LinkedList, borrow::ToOwned, string::String};
 
-use crate::{process::{FileDescriptor, get_processor, push_sum_on, pop_sum_on, enqueue, ProcessStatus, ProcessID, get_process, SignalNum, free_current}, mem::{VirtAddr, VMASegment, SegmentFlags, ManagedSegment, VPNRange, stat_mem}, utils::{ErrorNum}, fs::{Path, open, OpenMode, open_at, new_pipe}, interrupt::trap_context::TrapContext, config::PHYS_END_ADDR};
+use crate::{process::{FileDescriptor, get_processor, push_sum_on, pop_sum_on, enqueue, ProcessStatus, ProcessID, get_process, SignalNum, free_current}, mem::{VirtAddr, VMASegment, SegmentFlags, ManagedSegment, VPNRange, stat_mem, MMAPType}, utils::{ErrorNum}, fs::{Path, open, OpenMode, open_at, new_pipe}, interrupt::trap_context::TrapContext, config::PHYS_END_ADDR};
 
 use super::{syscall_num::*, types::{MMAPProt, MMAPFlag, SyscallDirent, SyscallStat}};
 
@@ -236,7 +236,12 @@ pub fn sys_mmap(tgt_addr: VirtAddr, length: usize, prot: MMAPProt, flag: MMAPFla
             mmap_file,
             seg_flag,
             offset,
-            length
+            length,
+            if flag.contains(MMAPFlag::SHARED) {
+                MMAPType::Shared
+            } else {
+                MMAPType::Private
+            }
         )?);
         proc_inner.mem_layout.do_map();
         Ok(VirtAddr::from(tgt_pos).0)
@@ -413,6 +418,11 @@ pub fn sys_sysstat(stat_ptr: VirtAddr) -> Result<usize, ErrorNum> {
         proc_inner.recv_signal(SignalNum::SIGSEGV).unwrap();
     }
     Ok(0)
+}
+
+pub fn sys_munmap() {
+
+    todo!()
 }
 
 pub fn sys_unknown(syscall_id:usize) -> Result<usize, ErrorNum> {
