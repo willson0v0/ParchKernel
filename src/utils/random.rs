@@ -1,7 +1,11 @@
 use crate::{config::UUID_LENGTH, utils::Mutex};
 
 use super::SpinMutex;
+use alloc::string::String;
 use lazy_static::*;
+use core::hash::Hash;
+use core::fmt::{Debug, Display};
+use crate::alloc::string::ToString;
 
 lazy_static!{
     static ref RAND_STATE: XorShiftState = XorShiftState { inner: SpinMutex::new("rand state", XorShiftStateInner::new()) };
@@ -38,31 +42,45 @@ pub fn rand_usize() -> usize {
     t.wrapping_add(s)
 }
 
-fn gen_uuid() -> [u8; UUID_LENGTH] {
+fn gen_uuid() -> u128 {
     // split 2 usize into 16 bytes;
-    let b: [[u8; 8]; 2] = [rand_usize().to_be_bytes(), rand_usize().to_be_bytes()];
-    b.concat().try_into().unwrap()
+    let mut res: u128 = rand_usize() as u128;
+    res = res << 64;
+    res += rand_usize() as u128;
+    res
 }
 
-#[derive(Debug, PartialEq, PartialOrd, Eq, Ord, Clone, Copy)]
-pub struct UUID {
-    bytes: [u8; UUID_LENGTH]
-}
+#[derive(PartialEq, PartialOrd, Eq, Ord, Clone, Copy, Hash)]
+pub struct UUID(pub u128);
 
 impl UUID {
     pub fn new() -> Self {
-        Self {
-            bytes: gen_uuid()
-        }
+        Self(gen_uuid())
     }
 
     pub fn to_bytes(&self) -> [u8; UUID_LENGTH] {
-        self.bytes
+        self.0.to_be_bytes()
     }
 
     pub fn from_bytes(bytes: [u8; UUID_LENGTH]) -> Self {
-        Self {
-            bytes
-        }
+        Self(u128::from_be_bytes(bytes))
+    }
+}
+
+impl Debug for UUID {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{}", self.to_string())?;
+        Ok(())
+    }
+}
+
+impl Display for UUID {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let p0 = (self.0 >>  0) & 0xFFFFFFFFFFFF;
+        let p1 = (self.0 >> 48) & 0xFFFF;
+        let p2 = (self.0 >> 64) & 0xFFFF;
+        let p3 = (self.0 >> 80) & 0xFFFF;
+        let p4 = (self.0 >> 96) & 0xFFFFFFFF;
+        write!(f, "{:8x}-{:4x}-{:4x}-{:4x}-{:12x}", p4, p3, p2, p1, p0)
     }
 }

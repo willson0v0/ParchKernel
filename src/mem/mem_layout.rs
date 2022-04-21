@@ -1,8 +1,8 @@
 use core::{arch::asm};
 
-use alloc::{vec::Vec, sync::Arc, borrow::ToOwned, string::String};
+use alloc::{vec::Vec, sync::Arc, string::String};
 use riscv::register::{satp};
-use crate::{utils::{ErrorNum}, config::{PHYS_END_ADDR, MMIO_RANGES, PAGE_SIZE, PROC_K_STACK_ADDR, TRAMPOLINE_ADDR, U_TRAMPOLINE_ADDR, TRAP_CONTEXT_ADDR, PROC_U_STACK_ADDR}, mem::{TrampolineSegment, UTrampolineSegment, TrapContextSegment, IdenticalMappingSegment, segment::{SegmentFlags, ProgramSegment}, VirtAddr, types::VPNRange, ManagedSegment, stat_mem, VMASegment, PageTableEntry, Segment}, fs::RegularFile, process::{get_processor, get_hart_id}};
+use crate::{utils::{ErrorNum}, config::{PHYS_END_ADDR, MMIO_RANGES, PAGE_SIZE, PROC_U_STACK_ADDR}, mem::{TrampolineSegment, UTrampolineSegment, TrapContextSegment, IdenticalMappingSegment, segment::{SegmentFlags, ProgramSegment}, VirtAddr, types::VPNRange, VMASegment}, fs::RegularFile, process::{get_processor, get_hart_id}};
 use super::{PageTable, VirtPageNum, ProcKStackSegment, segment::ProcUStackSegment, ArcSegment, MMAPType};
 
 use crate::utils::elf_rs_wrapper::read_elf;
@@ -319,12 +319,10 @@ impl MemLayout {
             verbose!("Handling PH {:x?}", p);
             if p.ph_type() == ProgramType::LOAD {
                 let seg_start: VirtAddr = (p.vaddr() as usize).into();
-                let seg_end: VirtAddr = seg_start + p.memsz() as usize;
                 if seg_start.0 % PAGE_SIZE != 0 {
                     panic!("Program header not aligned!")
                 }
                 let seg_start: VirtPageNum = seg_start.into();
-                let seg_end = seg_end.to_vpn_ceil();
                 let mut seg_flag = SegmentFlags::U;
                 if p.flags().contains(ProgramHeaderFlags::EXECUTE) {
                     seg_flag = seg_flag | SegmentFlags::X;
@@ -335,21 +333,6 @@ impl MemLayout {
                 if p.flags().contains(ProgramHeaderFlags::WRITE) {
                     seg_flag = seg_flag | SegmentFlags::W;
                 }
-
-                // let segment = ManagedSegment::new(
-                //     VPNRange::new(seg_start, seg_end), 
-                //     SegmentFlags::W | SegmentFlags::R, 
-                //     p.memsz() as usize
-                // );
-                // self.register_segment(segment.clone());
-                // self.do_map();
-                // // copy data into it
-                // let src = unsafe{ buffer.as_ptr().add(p.offset() as usize)};
-                // let dst = VirtAddr::from(seg_start).0 as *mut u8;
-                // let len = p.filesz() as usize;
-                // unsafe{core::ptr::copy_nonoverlapping(src, dst, len)}
-                // segment.as_managed()?.alter_permission(seg_flag, &mut self.pagetable);
-
 
                 let segment = ProgramSegment::new_at(
                     seg_start, 

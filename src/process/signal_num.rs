@@ -1,6 +1,6 @@
 enum_with_tryfrom_usize!{
     #[repr(usize)]
-    #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
     pub enum SignalNum {
         SIGHUP    =  1,
         SIGINT    =  2,

@@ -8,6 +8,7 @@
 #![feature(drain_filter)]
 #![allow(dead_code)]
 #![deny(unused_must_use)]
+#![feature(associated_type_defaults)]
 
 // lock sequence
 // 
@@ -26,15 +27,14 @@ mod version;
 mod fs;
 mod process;
 mod syscall;
+mod device;
 
 #[macro_use]
 extern crate alloc;
 extern crate lazy_static;
 extern crate static_assertions;
 extern crate elf_rs;
-
-// #[macro_use]
-// extern crate alloc_no_stdlib;
+extern crate fdt_rs;
 
 use core::{arch::{global_asm, asm}, sync::atomic::{AtomicBool, Ordering}};
 
@@ -138,6 +138,14 @@ extern "C" fn genesis_s() -> ! {
         // common init code (mm/fs)
         mem::init();
         mem::hart_init();
+
+        {
+            extern "C" {
+                fn device_tree_blob();
+            }
+            let dtb = device::DeviceTree::parse(mem::PhysAddr::from(device_tree_blob as usize)).unwrap();
+            dtb.print(utils::LogLevel::Info);
+        }
 
         interrupt::init();
         interrupt::init_hart();

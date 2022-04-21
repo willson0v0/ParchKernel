@@ -19,3 +19,5 @@ pub const SYSCALL_GETDENTS  : usize =  17;
 pub const SYSCALL_PIPE      : usize =  18;
 pub const SYSCALL_SYSSTAT   : usize =  19;
 pub const SYSCALL_MUNMAP    : usize =  20;
+pub const SYSCALL_MKDIR     : usize =  21;
+pub const SYSCALL_TIME      : usize =  22;

@@ -174,3 +174,23 @@ macro_rules! println {
         $crate::print!("{}\r\n", format_args!($($arg)*))
     };
 }
+
+#[macro_export]
+macro_rules! AddCounter {
+    ($name: ident) => {
+        // wrap zst inside a anonymous const var so we get different static func each time
+        const _: () = {
+            struct CountZST;
+            impl core::ops::Deref for CountZST {
+                type Target = core::sync::atomic::AtomicUsize;
+                fn deref(&self) -> &'static Self::Target {
+                    static S: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
+                    &S
+                }
+            }
+            impl $name {
+                const COUNT: CountZST = CountZST;
+            }
+        };
+    }
+}

@@ -285,8 +285,8 @@ crate::enum_with_tryfrom_usize!{
         ESIGDISABLED    = 1009,
         /// Bad codex
         EBADCODEX       = 1010,
-        /// hard link cross fs
-        ELINKCROSSFS    = 1011,
+        /// Bad dtb format
+        EBADDTB         = 1011,
     }
 }
 

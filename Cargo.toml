@@ -18,6 +18,12 @@ riscv = "0.7.0"
 lazy_static = { version = "1.4.0", features = ["spin_no_std"] }
 static_assertions = "1.1.0"
 elf_rs = "0.2.0"
+rjson = "0.3.1"
+
+
+[dependencies.fdt-rs]
+version = "0.4"
+default-features = false
 
 [build-dependencies]
 chrono = "0.4"

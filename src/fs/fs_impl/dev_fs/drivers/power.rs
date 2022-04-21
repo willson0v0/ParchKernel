@@ -1,1 +1,4 @@
-//! /dev/power
+//! /dev/poweroff
+//! /dev/reboot
+
+struct DevPoweroff{}

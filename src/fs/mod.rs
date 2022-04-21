@@ -45,7 +45,12 @@ use crate::utils::{RWLock, ErrorNum};
 use self::types::Permission;
 
 lazy_static!{
-    pub static ref MOUNT_MANAGER: MountManager = MountManager::new(fs_impl::PARCH_FS.clone());
+    pub static ref MOUNT_MANAGER: MountManager = {
+        let root_fs = fs_impl::PARCH_FS.clone();
+        let res = MountManager::new(root_fs);
+        verbose!("Mount manager initialized");
+        res
+    };
 }
 
 pub fn open(path: &Path, mode: OpenMode) -> Result<alloc::sync::Arc<dyn File>, crate::utils::ErrorNum> {
@@ -57,8 +62,12 @@ pub fn open_at(file: Arc<dyn File>, rel_path: &Path, mode: OpenMode) -> Result<A
 }
 
 pub fn init() {
+    verbose!("Initializing /dev mount point");
     MOUNT_MANAGER.inner.acquire_r().make_file(&"/dev".into(), Permission::from_bits_truncate(0o544), types::FileType::DIR).expect("Failed to create dev fs mount point.");
+    verbose!("Initializing /dev");
     MOUNT_MANAGER.inner.acquire_w().mount("/dev".into(), fs_impl::DEV_FS.clone()).expect("Failed to mount dev fs.");
+    verbose!("Initializing /proc mount point");
     MOUNT_MANAGER.inner.acquire_r().make_file(&"/proc".into(), Permission::from_bits_truncate(0o544), types::FileType::DIR).expect("Failed to create proc fs mount point.");
+    verbose!("Initializing /proc");
     MOUNT_MANAGER.inner.acquire_w().mount("/proc".into(), fs_impl::PROC_FS.clone()).expect("Failed to mount proc fs.");
 }

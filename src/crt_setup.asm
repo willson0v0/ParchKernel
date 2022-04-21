@@ -16,3 +16,10 @@ boot_stack:
     .space 4096 * 4 * 16
     .globl boot_stack_top
 boot_stack_top:
+
+    .section .rodata
+    .globl device_tree_blob
+device_tree_blob:
+    .incbin "output/qemu.dtb"
+    .globl device_tree_blob_end
+device_tree_blob_end:

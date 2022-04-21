@@ -1,5 +1,5 @@
 use alloc::borrow::ToOwned;
-use alloc::{collections::BTreeMap};
+use alloc::collections::BTreeMap;
 use alloc::sync::Arc;
 use crate::config::{MAX_LINK_RECURSE};
 use crate::utils::{SpinRWLock, ErrorNum, UUID};
@@ -92,6 +92,7 @@ impl MountManagerInner {
     }
     
     pub fn make_file(&self, path: &Path, perm: Permission, f_type: FileType) -> Result<(), ErrorNum> {
+        verbose!("make file for {:?}, type {:?}", path, f_type);
         let dir = self.open(&path.strip_tail(), OpenMode::READ | OpenMode::WRITE)?.as_dir()?;
         dir.make_file(path.last().clone(), perm, f_type)?;
         Ok(())
@@ -112,7 +113,7 @@ impl MountManagerInner {
             link_vfs.link(dest_file, &link_file.without_prefix(&link_vfs.mount_path()))?;
             Ok(())
         } else {
-            Err(ErrorNum::ELINKCROSSFS)
+            Err(ErrorNum::EXDEV)
         }
     }
 

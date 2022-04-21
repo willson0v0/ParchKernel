@@ -1,12 +1,7 @@
 use core::fmt::{self, Debug, Formatter};
-
-use core::cmp::min;
-
-
 use _core::any::Any;
 use alloc::{sync::{Arc}, collections::BTreeMap, vec::Vec, borrow::ToOwned};
 use bitflags::*;
-use crate::fs::File;
 use crate::{config::{PAGE_SIZE, PROC_K_STACK_SIZE, PROC_K_STACK_ADDR, PROC_U_STACK_SIZE, PROC_U_STACK_ADDR}, utils::{SpinMutex, Mutex}};
 use crate::{fs::{RegularFile}, utils::ErrorNum, config::{TRAMPOLINE_ADDR, U_TRAMPOLINE_ADDR, TRAP_CONTEXT_ADDR}};
 
@@ -673,7 +668,7 @@ impl Segment for TrampolineSegment {
         vpn == TRAMPOLINE_ADDR.into()
     }
 
-    fn clone_seg(self: Arc<Self>, pagetable: &mut PageTable) -> Result<ArcSegment, ErrorNum> {
+    fn clone_seg(self: Arc<Self>, _pagetable: &mut PageTable) -> Result<ArcSegment, ErrorNum> {
         Ok(Self::new())
     }
 
@@ -730,7 +725,7 @@ impl Segment for UTrampolineSegment {
         vpn == U_TRAMPOLINE_ADDR.into()
     }
 
-    fn clone_seg(self: Arc<Self>, pagetable: &mut PageTable) -> Result<ArcSegment, ErrorNum> {
+    fn clone_seg(self: Arc<Self>, _pagetable: &mut PageTable) -> Result<ArcSegment, ErrorNum> {
         Ok(Self::new())
     }
 
@@ -874,7 +869,7 @@ impl Segment for ProcKStackSegment {
         VPNRange::new(PROC_K_STACK_ADDR.into(), (PROC_K_STACK_ADDR + PROC_K_STACK_SIZE).into()).contains(vpn)
     }
 
-    fn clone_seg(self: Arc<Self>, pagetable: &mut PageTable) -> Result<ArcSegment, ErrorNum> {
+    fn clone_seg(self: Arc<Self>, _pagetable: &mut PageTable) -> Result<ArcSegment, ErrorNum> {
         Ok(Self::new())
     }
 

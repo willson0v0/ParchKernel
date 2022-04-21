@@ -1,6 +1,6 @@
 use core::{mem::size_of, cmp::Ordering};
 
-use alloc::{sync::{Arc, Weak}, collections::{BTreeMap, VecDeque, LinkedList}, vec::Vec};
+use alloc::{collections::{BTreeMap, LinkedList, VecDeque}, sync::{Arc, Weak}, vec::Vec};
 
 use crate::{mem::{MemLayout, VirtAddr, VirtPageNum}, utils::{SpinMutex, MutexGuard, Mutex, ErrorNum}, fs::{Path, open, OpenMode, RegularFile, File}, interrupt::trap_context::TrapContext, config::{TRAP_CONTEXT_ADDR, PROC_U_STACK_ADDR, PROC_U_STACK_SIZE, U_TRAMPOLINE_ADDR, MAX_FD, MAX_SYSCALL}, process::{def_handler::*, push_sum_on, pop_sum_on, get_processor}, syscall::syscall_num::{SYSCALL_WRITE, SYSCALL_READ}};
 
@@ -41,7 +41,7 @@ impl Ord for ProcessControlBlock {
 }
 
 #[repr(C)]
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash)]
 pub struct FileDescriptor(pub usize);
 
 impl From<usize> for FileDescriptor {

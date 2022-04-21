@@ -154,6 +154,35 @@ impl PhysAddr {
             PhysPageNum(((self.0 - 1) >> PAGE_OFFSET) + 1)
         }
     }
+
+    /// Used in dtb parsing
+    pub fn read_cstr(&self) -> String {
+        let mut bytes = Vec::new();
+        let mut va = self.clone();
+        loop {
+            let b: u8 = unsafe{va.read_volatile()};
+            if b == 0 {
+                break;
+            }
+            bytes.push(b);
+            va = va + size_of::<u8>();
+        }
+        String::from_utf8(bytes).unwrap()
+    }
+
+    pub fn read_str(&self, len: usize) -> String {
+        let mut bytes = Vec::new();
+        let mut va = self.clone();
+        loop {
+            let b: u8 = unsafe{va.read_volatile()};
+            bytes.push(b);
+            va = va + size_of::<u8>();
+            if bytes.len() >= len {
+                break;
+            }
+        }
+        String::from_utf8(bytes).unwrap()
+    }
 }
 
 impl VirtAddr {
