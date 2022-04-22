@@ -20,10 +20,12 @@
 //! free space
 //! ===== tail =====
 
+use alloc::sync::{Arc, Weak};
 use alloc::{string::String, vec::Vec};
-use crate::utils::{ErrorNum, LogLevel};
+use crate::utils::{ErrorNum, LogLevel, RWLock, SpinRWLock};
 use crate::mem::PhysAddr;
 use core::fmt::Debug;
+use core::mem::size_of;
 
 
 /// The header of .dtb file (Flattened Devicetree)
@@ -54,7 +56,7 @@ struct FDTHeader {
 /// The list end with a entry with all zero
 #[repr(C)]
 struct FDTReserveEntry {
-    pub address: PhysAddr,
+    pub address: u64,
     pub size: u64
 }
 
@@ -73,34 +75,40 @@ impl FDTReserveEntry {
     }
 
     pub fn is_end(&self) -> bool {
-        self.address.0 == 0 && self.size == 0
+        self.address == 0 && self.size == 0
     }
 }
 
-/// Type of FDTTokens
-#[repr(u32)]
-enum FDTTokenType {
-    /// Marks the begining of a node's representation.
-    BeginNode   = 0x00000001,
-    /// Marks the end of a node's representation.
-    EndNode     = 0x00000002,
-    /// Property in a node's representation.
-    Property    = 0x00000003,
-    /// Ignored
-    Nop         = 0x00000004,
-    /// End of the whole structure block
-    End         = 0x00000005,
+crate::enum_with_tryfrom_u32! {
+    /// Type of FDTTokens
+    #[repr(u32)]
+    enum FDTTokenType {
+        /// Marks the begining of a node's representation.
+        BeginNode   = u32::from_be(0x00000001),
+        /// Marks the end of a node's representation.
+        EndNode     = u32::from_be(0x00000002),
+        /// Property in a node's representation.
+        Property    = u32::from_be(0x00000003),
+        /// Ignored
+        Nop         = u32::from_be(0x00000004),
+        /// End of the whole structure block
+        End         = u32::from_be(0x00000009),
+    }
 }
 
+#[derive(Debug)]
 struct FDTBeginNodeToken {
     unit_name: String
 }
 
+#[derive(Debug)]
 struct FDTPropertyToken {
     length: u32,
-    offset: u32
+    offset: u32,
+    value: Vec<u8>
 }
 
+#[derive(Debug)]
 enum FDTToken {
     BeginNode(FDTBeginNodeToken),
     EndNode,
@@ -111,50 +119,74 @@ enum FDTToken {
 
 impl FDTToken {
     /// read_volatile will copy data so ownership should be fine
-    pub fn read_token(addr: PhysAddr) -> (FDTToken, PhysAddr) {
-        let token_type: FDTTokenType = unsafe { addr.read_volatile() };
+    pub fn read_token(addr: PhysAddr) -> Result<(FDTToken, PhysAddr), ErrorNum> {
+        let token_type = FDTTokenType::try_from(unsafe { addr.read_volatile::<u32>() })?;
         let nxt_ptr = addr + core::mem::size_of::<FDTTokenType>();
         match token_type {
             FDTTokenType::BeginNode => {
                 let unit_name = nxt_ptr.read_cstr();
-                let len = unit_name.len();
-                (FDTToken::BeginNode(FDTBeginNodeToken{unit_name}), nxt_ptr + len)
+                let mut len = unit_name.len();
+                if len % 4 != 0 {
+                    len += 4 - (len % 4);
+                }
+                loop {
+                    let nxt: u32 = unsafe{(nxt_ptr + len).read_volatile()};
+                    if nxt == 0 {
+                        len += 4;
+                    } else {
+                        break;
+                    }
+                }
+                Ok((FDTToken::BeginNode(FDTBeginNodeToken{unit_name}), nxt_ptr + len))
             },
-            FDTTokenType::EndNode => (FDTToken::EndNode, nxt_ptr),
+            FDTTokenType::EndNode => Ok((FDTToken::EndNode, nxt_ptr)),
             FDTTokenType::Property => {
-                (FDTToken::Property(unsafe{nxt_ptr.read_volatile()}), nxt_ptr + core::mem::size_of::<FDTPropertyToken>())
+                let length = u32::from_be(unsafe{nxt_ptr.read_volatile()});
+                let offset = u32::from_be(unsafe{(nxt_ptr + 4).read_volatile()});
+                let value = (nxt_ptr + 8).read_str(length as usize);
+                let mut len = 8usize + length as usize;
+                if len % 4 != 0 {
+                    len += 4 - (len % 4);
+                }
+                Ok((FDTToken::Property(FDTPropertyToken{ length, offset, value }), nxt_ptr + len))
             },
-            FDTTokenType::Nop => (FDTToken::Nop, nxt_ptr),
-            FDTTokenType::End => (FDTToken::End, nxt_ptr),
+            FDTTokenType::Nop => Ok((FDTToken::Nop, nxt_ptr)),
+            FDTTokenType::End => Ok((FDTToken::End, nxt_ptr)),
         }
     }
 }
 
 pub struct DeviceTree {
     reserved_mem: Vec<DTBMemReserve>,
-    nodes: Vec<DTBNode>,
+    nodes: Vec<Arc<SpinRWLock<DTBNode>>>,
 }
 
 impl DeviceTree {
     pub fn parse(addr: PhysAddr) -> Result<Self, ErrorNum> {
+        verbose!("Parsing on {:?}", addr);
         let header: FDTHeader = unsafe { addr.read_volatile() };
-        if header.magic != 0xD00DFEED {
+        if header.magic != 0xD00DFEED_u32.to_be() {
+            warning!("Bad dtb magic number");
             return Err(ErrorNum::EBADDTB)
         }
 
-        let rsvmap_addr = addr + header.rsvmap_offset as usize;
-        let struct_addr = addr + header.struct_offset as usize;
-        let string_addr = addr + header.string_offset as usize;
+        let rsvmap_addr = addr + u32::from_be(header.rsvmap_offset) as usize;
+        let struct_addr = addr + u32::from_be(header.struct_offset) as usize;
+        let string_addr = addr + u32::from_be(header.string_offset) as usize;
+
+        verbose!("rsvmap_addr: {:?}", rsvmap_addr);
+        verbose!("struct_addr: {:?}", struct_addr);
+        verbose!("string_addr: {:?}", string_addr);
 
         let reserved_mem = FDTReserveEntry::get_entries(rsvmap_addr)?.into_iter().map(|fdt_entry| DTBMemReserve {
-            start: fdt_entry.address,
-            length: fdt_entry.size as usize,
+            start: (u64::from_be(fdt_entry.address) as usize).into(),
+            length: u64::from_be(fdt_entry.size) as usize,
         }).collect();
 
         let mut nodes = Vec::new();
         let mut iter = struct_addr;
         loop {
-            let res = DTBNode::read_node(iter, string_addr)?;
+            let res = DTBNode::read_node(iter, string_addr, None)?;
             if let Some((node, nxt_start)) = res {
                 nodes.push(node);
                 iter = nxt_start;
@@ -177,7 +209,7 @@ impl DeviceTree {
         }
         log!(log_level, "- Nodes: ");
         for node in self.nodes.iter() {
-            node.print(log_level, 0);
+            node.acquire_r().print(log_level, 0);
         }
     }
 }
@@ -187,29 +219,106 @@ pub struct DTBMemReserve {
     length: usize
 }
 
+#[derive(Debug)]
+pub enum DTBPropertyValue {
+    Empty,
+    UInt32(u32),
+    UInt64(u64),
+    CStr(String),
+    CStrList(Vec<String>),
+    Custom(Vec<u8>)
+}
+
+impl DTBPropertyValue {
+    pub fn from_bytes(name: String, value: Vec<u8>) -> Result<Self, ErrorNum> {
+        let res = match name.as_str() {
+            "riscv,isa"             => Self::CStr(Self::get_cstr(value)?),
+            "mmu-type"              => Self::CStr(Self::get_cstr(value)?),
+            "compatible"            => Self::CStrList(Self::get_cstr_list(value)?),
+            "model"                 => Self::CStr(Self::get_cstr(value)?),
+            "device_type"           => Self::CStr(Self::get_cstr(value)?),
+            "phandle"               => Self::UInt32(Self::get_u32(value)?),
+            "status"                => Self::CStr(Self::get_cstr(value)?),
+            "#address-cells"        => Self::UInt32(Self::get_u32(value)?),
+            "#size-cells"           => Self::UInt32(Self::get_u32(value)?),
+            "reg"                   => Self::Custom(value),
+            "virtual-reg"           => Self::UInt32(Self::get_u32(value)?),
+            "ranges"                => Self::Custom(value),
+            "dma-range"             => Self::Custom(value),
+            "interrupts"            => Self::UInt32(Self::get_u32(value)?),
+            "interrupt-parent"      => Self::UInt32(Self::get_u32(value)?),
+            "#interrupt-cells"      => Self::UInt32(Self::get_u32(value)?),
+            "interrupt-controller"  => Self::Empty,
+            "interrupts-extended"   => Self::Custom(value),
+            "interrupt-map-mask"    => Self::Custom(value),
+            "regmap"                => Self::UInt32(Self::get_u32(value)?),
+            "offset"                => Self::UInt32(Self::get_u32(value)?),
+            "value"                 => Self::UInt32(Self::get_u32(value)?),
+            "cpu"                   => Self::UInt32(Self::get_u32(value)?),
+            "clock-frequency"       => {
+                if value.len() == size_of::<u32>() {
+                    Self::UInt32(Self::get_u32(value)?)
+                } else if value.len() == size_of::<u64>() {
+                    Self::UInt64(Self::get_u64(value)?)
+                } else {
+                    return Err(ErrorNum::EBADDTB)
+                }
+            },
+            unknown => {
+                warning!("Unrecognized property {} in DTB", unknown);
+                Self::Custom(value)
+            }
+        };
+        Ok(res)
+    }
+
+    fn get_cstr_list(value: Vec<u8>) -> Result<Vec<String>, ErrorNum> {
+        value.split(|byte| *byte == 0).filter(|arr| arr.len() != 0).map(|arr| Self::get_cstr(arr.to_vec())).collect::<Result<Vec<String>, ErrorNum>>()
+    }
+
+    fn get_cstr(value: Vec<u8>) -> Result<String, ErrorNum> {
+        let mut res = String::from_utf8(value).map_err(|_| ErrorNum::EBADCODEX)?;
+        if res.ends_with("\0") {
+            res.pop();
+        }
+        Ok(res)
+    }
+
+    fn get_u32(value: Vec<u8>) -> Result<u32, ErrorNum> {
+        Ok(u32::from_be_bytes(value.try_into().map_err(|_| ErrorNum::EBADDTB)?))
+    }
+
+    fn get_u64(value: Vec<u8>) -> Result<u64, ErrorNum> {
+        Ok(u64::from_be_bytes(value.try_into().map_err(|_| ErrorNum::EBADDTB)?))
+    }
+}
+
 pub struct DTBNode {
     unit_name: String,
-    properties: Vec<String>,
-    children: Vec<DTBNode>,
+    properties: Vec<(String, DTBPropertyValue)>,
+    children: Vec<Arc<SpinRWLock<DTBNode>>>,
+    parent: Option<Weak<SpinRWLock<DTBNode>>>,
 }
 
 impl DTBNode {
     pub fn print(&self, log_level: LogLevel, indent: usize) {
         let indent_str: String = (0..indent).map(|_| "\t").collect();
-        log!(log_level, "{}{}", indent_str, self.unit_name);
-        log!(log_level, "{}- properties:", indent_str);
+        log!(log_level, "{}Node <{}>", indent_str, self.unit_name);
         for property in self.properties.iter() {
-            log!(log_level, "{}\t- {}", indent_str, property);
+            log!(log_level, "{} - {}: {:?}", indent_str, property.0, property.1);
         }
-        log!(log_level, "{}- children:", indent_str);
-        for child in self.children.iter() {
-            child.print(log_level, indent+1);
-            log!(log_level, "");
+        if !self.children.is_empty() {
+            log!(log_level, "{} - children:", indent_str);
+            for child in self.children.iter() {
+                child.acquire_r().print(log_level, indent+1);
+            }
         }
     }
 
     /// return node & it's end position's next address
-    pub fn read_node(start: PhysAddr, str_block: PhysAddr) -> Result<Option<(DTBNode, PhysAddr)>, ErrorNum> {
+    pub fn read_node(start: PhysAddr, str_block: PhysAddr, parent: Option<Weak<SpinRWLock<DTBNode>>>) -> Result<Option<(Arc<SpinRWLock<DTBNode>>, PhysAddr)>, ErrorNum> {
+        verbose!("Parsing node from {:?}", start);
+        #[derive(Debug)]
         enum FSMState {
             Begin,
             Property,
@@ -218,18 +327,22 @@ impl DTBNode {
 
         let mut state = FSMState::Begin;
         let mut iter = start;
-        let mut node: DTBNode = DTBNode {
+        let node = Arc::new(SpinRWLock::new(DTBNode {
             unit_name: "".into(),
             properties: Vec::new(),
             children: Vec::new(),
-        };
+            parent
+        }));
+        let node_clone = node.clone();
+        let mut node_guard = node_clone.acquire_w();
         loop {
-            let (token, nxt_addr) = FDTToken::read_token(iter);
+            let (token, nxt_addr) = FDTToken::read_token(iter)?;
+            verbose!("reading on {:?}, current token {:?}, current state {:?}", iter, token, state);
             match state {
                 FSMState::Begin => {
                     match token {
                         FDTToken::BeginNode(token) => {
-                            node.unit_name = token.unit_name;
+                            node_guard.unit_name = token.unit_name;
                             state = FSMState::Property;
                             iter = nxt_addr;
                         },
@@ -237,16 +350,20 @@ impl DTBNode {
                             iter = nxt_addr;
                         },
                         FDTToken::EndNode => {
-                            return Ok(None);
+                            warning!("token {:?} found when in {:?} state", token, state);
+                            return Err(ErrorNum::EBADDTB)
                         },
-                        _ => return Err(ErrorNum::EBADDTB)
+                        _ => {
+                            return Ok(None)
+                        }
                     }
                 },
                 FSMState::Property => {
                     match token {
                         FDTToken::Property(token) => {
                             iter = nxt_addr;
-                            node.properties.push((str_block + token.offset as usize).read_str(token.length as usize));
+                            let name = (str_block + token.offset as usize).read_cstr();
+                            node_guard.properties.push((name.clone(), DTBPropertyValue::from_bytes(name, token.value)?));
                         },
                         FDTToken::Nop => {
                             iter = nxt_addr;
@@ -255,30 +372,32 @@ impl DTBNode {
                             state = FSMState::Child;
                         },
                         FDTToken::EndNode => return Ok(Some((node, nxt_addr))),
-                        _ => return Err(ErrorNum::EBADDTB),
+                        _ => {
+                            warning!("token {:?} found when in {:?} state", token, state);
+                            return Err(ErrorNum::EBADDTB)
+                        },
                     }
                 },
                 FSMState::Child => {
                     match token {
                         FDTToken::BeginNode(_) => {
-                            let child_res = Self::read_node(iter, str_block)?;
+                            let child_res = Self::read_node(iter, str_block, Some(Arc::downgrade(&node)))?;
                             if let Some((child, addr)) = child_res {
                                 iter = addr;
-                                node.children.push(child);
+                                node_guard.children.push(child);
                             } else {
                                 // starts with BeginNode, must have child, not format error, panic
                                 panic!("dtb no child?")
                             }
                         },
                         FDTToken::EndNode => return Ok(Some((node, nxt_addr))),
-                        _ => return Err(ErrorNum::EBADDTB),
+                        _ => {
+                            warning!("token {:?} found when in {:?} state", token, state);
+                            return Err(ErrorNum::EBADDTB)
+                        },
                     }
                 },
             }
         }
     }
-}
-
-fn test(a: FDTHeader) {
-    let b = a.string_offset;
 }

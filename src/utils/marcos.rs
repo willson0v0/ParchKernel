@@ -56,6 +56,29 @@ macro_rules! enum_with_tryfrom_usize {
 }
 
 #[macro_export]
+macro_rules! enum_with_tryfrom_u32 {
+    ($(#[$meta:meta])* $vis:vis enum $name:ident {
+        $($(#[$vmeta:meta])* $vname:ident $(= $val:expr)?,)*
+    }) => {
+        $(#[$meta])*
+        $vis enum $name {
+            $($(#[$vmeta])* $vname $(= $val)?,)*
+        }
+
+        impl core::convert::TryFrom<u32> for $name {
+            type Error = crate::utils::ErrorNum;
+
+            fn try_from(v: u32) -> Result<Self, Self::Error> {
+                match v {
+                    $(x if x == $name::$vname as u32 => Ok($name::$vname),)*
+                    _ => Err(crate::utils::ErrorNum::ENOSYS),
+                }
+            }
+        }
+    }
+}
+
+#[macro_export]
 macro_rules! enum_with_tryfrom_u16 {
     ($(#[$meta:meta])* $vis:vis enum $name:ident {
         $($(#[$vmeta:meta])* $vname:ident $(= $val:expr)?,)*

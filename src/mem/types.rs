@@ -158,30 +158,30 @@ impl PhysAddr {
     /// Used in dtb parsing
     pub fn read_cstr(&self) -> String {
         let mut bytes = Vec::new();
-        let mut va = self.clone();
+        let mut pa = self.clone();
         loop {
-            let b: u8 = unsafe{va.read_volatile()};
+            let b: u8 = unsafe{pa.read_volatile()};
             if b == 0 {
                 break;
             }
             bytes.push(b);
-            va = va + size_of::<u8>();
+            pa = pa + size_of::<u8>();
         }
         String::from_utf8(bytes).unwrap()
     }
 
-    pub fn read_str(&self, len: usize) -> String {
+    pub fn read_str(&self, len: usize) -> Vec<u8> {
         let mut bytes = Vec::new();
-        let mut va = self.clone();
+        let mut pa = self.clone();
         loop {
-            let b: u8 = unsafe{va.read_volatile()};
+            let b: u8 = unsafe{pa.read_volatile()};
             bytes.push(b);
-            va = va + size_of::<u8>();
+            pa = pa + size_of::<u8>();
             if bytes.len() >= len {
                 break;
             }
         }
-        String::from_utf8(bytes).unwrap()
+        bytes
     }
 }
 
