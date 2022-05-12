@@ -138,14 +138,8 @@ extern "C" fn genesis_s() -> ! {
         // common init code (mm/fs)
         mem::init();
         mem::hart_init();
-
-        {
-            extern "C" {
-                fn device_tree_blob();
-            }
-            let dtb = device::DeviceTree::parse(mem::PhysAddr::from(device_tree_blob as usize)).unwrap();
-            dtb.print(utils::LogLevel::Info);
-        }
+        
+        device::init();
 
         interrupt::init();
         interrupt::init_hart();

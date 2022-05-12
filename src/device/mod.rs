@@ -8,6 +8,8 @@ pub use device_tree::{
     DeviceTree
 };
 
+use crate::utils::RWLock;
+
 pub fn init() {
-    
+    DEVICE_MANAGER.acquire_r(); // invoke it to trigger initialzation process
 }
