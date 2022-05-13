@@ -1,7 +1,9 @@
+use alloc::string::ToString;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 use crate::device::DeviceTree;
+use crate::device::device_tree::DTBPropertyValue;
 use crate::{device::device_manager::Driver, mem::PhysAddr};
 use crate::utils::{ErrorNum, RWLock, UUID};
 use core::fmt::Debug;
@@ -21,7 +23,7 @@ impl Debug for RTC {
 impl Driver for RTC {
     fn new(dev_tree: DeviceTree) -> Result<Vec<(UUID, Arc<(dyn Driver + 'static)>)>, ErrorNum> where Self: Sized {
         let mut res = Vec::new();
-        let nodes = dev_tree.search_compatible("google,goldfish-rtc");
+        let nodes = dev_tree.search("compatible", DTBPropertyValue::CStr("google,goldfish-rtc".to_string()))?;
         for node in nodes {
             let mut node_r = node.acquire_r();
             let uuid = node_r.driver;
@@ -60,5 +62,9 @@ impl Driver for RTC {
 
     fn handle_int(&self) -> Result<(), ErrorNum> {
         panic!("No Int for RTC!")
+    }
+
+    fn as_int_controller<'a>(self: Arc<Self>) -> Result<Arc<dyn crate::device::device_manager::IntController>, ErrorNum> {
+        Err(ErrorNum::ENOTINTC)
     }
 }

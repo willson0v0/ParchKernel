@@ -287,6 +287,8 @@ crate::enum_with_tryfrom_usize!{
         EBADCODEX       = 1010,
         /// Bad dtb format
         EBADDTB         = 1011,
+        /// Not a int controller
+        ENOTINTC        = 1012,
     }
 }
 

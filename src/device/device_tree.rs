@@ -221,48 +221,37 @@ impl DeviceTree {
         }
     }
 
-    pub fn search_compatible(&self, compatible: &str) -> Vec<Arc<SpinRWLock<DTBNode>>> {
-        let mut res = Vec::new();
+    pub fn search_single(&self, field: &str, target: DTBPropertyValue) -> Result<Arc<SpinRWLock<DTBNode>>, ErrorNum> {
         for n in self.nodes.iter() {
-            res.append(&mut self.search_compatible_inner(compatible, n.clone()));
-        }
-        res
-    }
-
-    fn search_compatible_inner(&self, compatible: &str, root: Arc<SpinRWLock<DTBNode>>) -> Vec<Arc<SpinRWLock<DTBNode>>> {
-        let mut res = Vec::new();
-        if root.acquire_r().is_compatible(compatible) {
-            res.push(root.clone())
-        }
-        for c in root.acquire_r().children.iter() {
-            res.append(&mut self.search_compatible_inner(compatible, c.clone()));
-        }
-        res
-    }
-
-    pub fn get_by_phandle(&self, phandle: u32) -> Result<Arc<SpinRWLock<DTBNode>>, ErrorNum> {
-        for n in self.nodes.iter() {
-            let child_res = self.get_by_phandle_inner(phandle, n.to_owned());
-            if child_res.is_ok() {
-                return child_res;
+            match self.search_inner(field, target.clone(), n.clone())?.as_slice() {
+                [] => continue,
+                [dev] => return Ok(dev.clone()),
+                _ => panic!("Found multiple result"),
             }
         }
         Err(ErrorNum::ENXIO)
     }
 
-    fn get_by_phandle_inner(&self, phandle: u32, root: Arc<SpinRWLock<DTBNode>>) -> Result<Arc<SpinRWLock<DTBNode>>, ErrorNum> {
-        if let DTBPropertyValue::UInt32(val) = root.clone().acquire_r().get_value("phandle")? {
-            if val == phandle {
-                return Ok(root);
+    pub fn search(&self, field: &str, target: DTBPropertyValue) -> Result<Vec<Arc<SpinRWLock<DTBNode>>>, ErrorNum> {
+        let mut res = Vec::new();
+        for n in self.nodes.iter() {
+            res.extend(self.search_inner(field, target.clone(), n.clone())?);
+        }
+        return Ok(res);
+    }
+
+    fn search_inner(&self, field: &str, target: DTBPropertyValue, root: Arc<SpinRWLock<DTBNode>>) -> Result<Vec<Arc<SpinRWLock<DTBNode>>>, ErrorNum> {
+        let mut res = Vec::new();
+        let root_guard = root.acquire_r();
+        if let Ok(val) = root_guard.get_value(field) {
+            if val.equals(&target)? {
+                res.push(root.clone());
             }
         }
-        for c in root.acquire_r().children.iter() {
-            let child_res = self.get_by_phandle_inner(phandle, c.to_owned());
-            if child_res.is_ok() {
-                return child_res;
-            }
+        for child in root_guard.children.iter() {
+            res.extend(self.search_inner(field, target.clone(), child.clone())?);
         }
-        Err(ErrorNum::ENXIO)
+        return Ok(res)
     }
 }
 
@@ -280,6 +269,19 @@ pub enum DTBPropertyValue {
     CStr(String),
     CStrList(Vec<String>),
     Custom(Vec<u8>)
+}
+
+impl DTBPropertyValue {
+    pub fn equals(&self, other: &DTBPropertyValue) -> Result<bool, ErrorNum> {
+        match(self, other) {
+            (Self::UInt32(l0), Self::UInt32(r0))        => Ok(l0 == r0),
+            (Self::UInt64(l0), Self::UInt64(r0))        => Ok(l0 == r0),
+            (Self::CStr(l0), Self::CStr(r0))            => Ok(l0 == r0),
+            (Self::CStrList(l0), Self::CStrList(r0))    => Ok(l0 == r0),
+            (Self::Custom(l0), Self::Custom(r0))        => Ok(l0 == r0),
+            _ => Err(ErrorNum::EBADTYPE),
+        }
+    }
 }
 
 impl DTBPropertyValue {

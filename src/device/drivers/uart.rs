@@ -1,17 +1,15 @@
 //! UART driver for /dev/pts
 //! kernel print use utils/uart.rs
 
-use alloc::{boxed::Box, collections::VecDeque, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, collections::VecDeque, string::ToString, sync::Arc, vec::Vec};
 
-use crate::{device::device_manager::Driver, mem::PhysAddr, process::get_processor, utils::{Mutex, MutexGuard, RWLock, SpinMutex, UUID}};
+use crate::{device::{device_manager::Driver, device_tree::DTBPropertyValue}, mem::PhysAddr, process::get_processor, utils::{Mutex, MutexGuard, RWLock, SpinMutex, UUID}};
 use core::{any::Any, fmt::Debug};
 use crate::utils::ErrorNum;
 use bitflags::*;
 
 pub struct UART {
     base_address: PhysAddr,
-    int_handler: UUID,
-    irq_num: u32,
     clock_freq: u64,
     operator: SpinMutex<UARTOperator>,
     buffer_r: SpinMutex<VecDeque<u8>>,
@@ -298,7 +296,7 @@ impl UARTOperator {
 
 impl Debug for UART {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "UART @ {:?}, irq id {}, int handler {}", self.base_address, self.irq_num, self.int_handler)
+        write!(f, "UART @ {:?}", self.base_address)
     }
 }
 
@@ -306,19 +304,15 @@ impl Driver for UART {
     fn new(dev_tree: crate::device::DeviceTree) -> Result<alloc::vec::Vec<(UUID, alloc::sync::Arc<dyn Driver>)>, crate::utils::ErrorNum> where Self: Sized {
         let mut res = Vec::new();
         
-        let compatible = dev_tree.search_compatible("ns16550a");
+        let compatible = dev_tree.search("compatible", DTBPropertyValue::CStr("ns16550a".to_string()))?;
         for c in compatible {
             let uuid = UUID::new();
             let node = c.acquire_r();
             verbose!("Creating Driver instance for {} with uuid {}.", node.unit_name, uuid);
             let base_address: PhysAddr = node.reg_value()?[0].address.into();
-            let int_handler = dev_tree.get_by_phandle(node.get_value("interrupt-parent")?.get_u32()?)?.acquire_r().driver;
-            let irq_num = node.get_value("interrupts")?.get_u32()?;
             let clock_freq = node.get_value("clock-frequency")?.get_u64()?;
             let driver = Self {
                 base_address,
-                int_handler,
-                irq_num,
                 clock_freq,
                 operator: SpinMutex::new("UART", UARTOperator{
                     base_address,
@@ -408,5 +402,9 @@ impl Driver for UART {
             IntStatus::TimeOut => operator.deplete_r_buffer(&mut self.buffer_r.acquire()),
         }
         Ok(())
+    }
+
+    fn as_int_controller<'a>(self: Arc<Self>) -> Result<Arc<dyn crate::device::device_manager::IntController>, ErrorNum> {
+        Err(ErrorNum::ENOTINTC)
     }
 }
