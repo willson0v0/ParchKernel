@@ -21,6 +21,7 @@
 //! ===== tail =====
 
 use alloc::borrow::ToOwned;
+use alloc::string::ToString;
 use alloc::sync::{Arc, Weak};
 use alloc::{string::String, vec::Vec};
 use crate::utils::{ErrorNum, LogLevel, RWLock, SpinRWLock, UUID};
@@ -253,6 +254,52 @@ impl DeviceTree {
         }
         return Ok(res)
     }
+
+    pub fn serach_compatible(&self, compatible: &str) -> Result<Vec<Arc<SpinRWLock<DTBNode>>>, ErrorNum> {
+        let mut res = Vec::new();
+        for n in self.nodes.iter() {
+            res.extend(self.serach_compatible_inner(compatible, n.clone())?);
+        }
+        return Ok(res);
+    }
+
+    fn serach_compatible_inner(&self, compatible: &str, root: Arc<SpinRWLock<DTBNode>>) -> Result<Vec<Arc<SpinRWLock<DTBNode>>>, ErrorNum> {
+        let mut res = Vec::new();
+        let root_guard = root.acquire_r();
+        if let Ok(val) = root_guard.get_value("compatible") {
+            if val.contains(compatible)? {
+                res.push(root.clone());
+            }
+        }
+        for child in root_guard.children.iter() {
+            res.extend(self.serach_compatible_inner(compatible, child.clone())?);
+        }
+        return Ok(res)
+    }
+
+    pub fn hart_count(&self) -> usize {
+        self.search("device_type", DTBPropertyValue::CStr("cpu".to_string())).unwrap().len()
+    }
+
+    pub fn contains_field(&self, field: &str) -> Result<Vec<Arc<SpinRWLock<DTBNode>>>, ErrorNum> {
+        let mut res = Vec::new();
+        for n in self.nodes.iter() {
+            res.extend(self.contains_field_inner(field, n.clone())?);
+        }
+        return Ok(res);
+    }
+
+    fn contains_field_inner(&self, field: &str, root: Arc<SpinRWLock<DTBNode>>) -> Result<Vec<Arc<SpinRWLock<DTBNode>>>, ErrorNum> {
+        let mut res = Vec::new();
+        let root_guard = root.acquire_r();
+        if root_guard.get_value(field).is_ok() {
+            res.push(root.clone());
+        }
+        for child in root_guard.children.iter() {
+            res.extend(self.contains_field_inner(field, child.clone())?);
+        }
+        return Ok(res)
+    }
 }
 
 #[derive(Copy, Clone)]
@@ -280,6 +327,14 @@ impl DTBPropertyValue {
             (Self::CStrList(l0), Self::CStrList(r0))    => Ok(l0 == r0),
             (Self::Custom(l0), Self::Custom(r0))        => Ok(l0 == r0),
             _ => Err(ErrorNum::EBADTYPE),
+        }
+    }
+
+    pub fn contains(&self, tgt: &str) -> Result<bool, ErrorNum> {
+        if let Self::CStrList(content) = self {
+            Ok(content.iter().any(|x| x == tgt))
+        } else {
+            Err(ErrorNum::EBADTYPE)
         }
     }
 }

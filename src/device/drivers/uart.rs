@@ -90,8 +90,7 @@ pub enum IOCtlParam {
 pub enum IOCtlRes {
     Write,
     Read(u8),
-    Config,
-    IntHandled
+    Config
 }
 
 #[repr(u8)]
@@ -304,7 +303,7 @@ impl Driver for UART {
     fn new(dev_tree: crate::device::DeviceTree) -> Result<alloc::vec::Vec<(UUID, alloc::sync::Arc<dyn Driver>)>, crate::utils::ErrorNum> where Self: Sized {
         let mut res = Vec::new();
         
-        let compatible = dev_tree.search("compatible", DTBPropertyValue::CStr("ns16550a".to_string()))?;
+        let compatible = dev_tree.serach_compatible("ns16550a")?;
         for c in compatible {
             let uuid = UUID::new();
             let node = c.acquire_r();

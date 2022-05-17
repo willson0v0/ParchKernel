@@ -8,15 +8,22 @@ use crate::{mem::PhysAddr, utils::{ErrorNum, RWLock, SpinRWLock, UUID}};
 use super::{DeviceTree, device_tree::DTBPropertyValue, drivers::{plic::PLIC, rtc::RTC, uart::UART}};
 
 lazy_static!{
-    pub static ref DEVICE_MANAGER: SpinRWLock<DeviceManager> = SpinRWLock::new(DeviceManager{
-        list: BTreeMap::new(),
-        dev_tree: {
-            extern "C" {
-                fn device_tree_blob();
-            }
-            DeviceTree::parse(PhysAddr::from(device_tree_blob as usize)).unwrap()
+    pub static ref DEVICE_MANAGER: SpinRWLock<DeviceManager> = {
+        extern "C" {
+            fn device_tree_blob();
         }
-    });
+        let dev_tree = DeviceTree::parse(PhysAddr::from(device_tree_blob as usize)).unwrap();
+        SpinRWLock::new(DeviceManager{
+            list: BTreeMap::new(),
+            int_controller : {
+                match PLIC::new(dev_tree.clone()).unwrap().as_slice() {
+                    [(_uuid, driver)] => driver.clone().as_int_controller().unwrap(),
+                    _ => panic!("No int controller found")
+                }
+            },
+            dev_tree
+        })
+    };
 }
 
 pub enum DeviceStatus {
@@ -27,7 +34,7 @@ pub enum DeviceStatus {
 }
 
 pub trait Driver: Send + Sync + Debug {
-    fn new(devtree: DeviceTree) -> Result<Vec<(UUID, Arc<dyn Driver>)>, ErrorNum> where Self: Sized;
+    fn new(dev_tree: DeviceTree) -> Result<Vec<(UUID, Arc<dyn Driver>)>, ErrorNum> where Self: Sized;
     fn initialize(&self) -> Result<(), ErrorNum>;
     fn terminate(&self);
     fn ioctl(&self, op: usize, data: Box<dyn Any>) -> Result<Box<dyn Any>, ErrorNum>;
@@ -39,12 +46,13 @@ pub trait Driver: Send + Sync + Debug {
 
 pub trait IntController: Driver {
     fn clear_int(&self, int_num: u32) -> Result<(), ErrorNum>;
-    fn enable_int(&self, int_num: u32) -> Result<(), ErrorNum>;
-    fn disable_int(&self, int_num: u32) -> Result<(), ErrorNum>;
+    fn claim_int(&self) -> Result<u32, ErrorNum>;
 }
 
 pub struct DeviceManager {
     list: BTreeMap<UUID, Arc<dyn Driver>>,
+    /// there will be only ONE interrupt gateway(PLIC) in risc-v spec
+    int_controller: Arc<dyn IntController>,
     dev_tree: DeviceTree
 }
 
@@ -71,19 +79,13 @@ impl DeviceManager {
         self.list.iter().map(|(uuid, driver)| (uuid.clone(), driver.clone())).collect()
     }
 
-    pub fn handle_interrupt(&self, int_id: usize) -> Result<(), ErrorNum> {
-        let int_id: u32 = int_id as u32;
-        let device_guard = self.dev_tree.search_single("interrupts", DTBPropertyValue::UInt32(int_id))?;
-        let device = device_guard.acquire_r();
+    pub fn handle_interrupt(&self) -> Result<(), ErrorNum> {
+        let int_id = self.int_controller.claim_int().unwrap();
 
-        let driver_uuid = device.driver;
-        let handler_phandle = device.get_value("interrupt-parent")?.get_u32()?;
-        let handler = self.dev_tree.search_single("phandle", DTBPropertyValue::UInt32(handler_phandle))?;
-        let handler_driver = self.get_device(handler.acquire_r().driver)?;
-
-        let driver = self.get_device(driver_uuid)?;
+        let dtb_node = self.dev_tree.search_single("interrupts", DTBPropertyValue::UInt32(int_id))?;
+        let driver = self.get_device(dtb_node.acquire_r().driver)?;
         driver.handle_int()?;
-        let handler_driver = handler_driver.as_int_controller().unwrap();
-        handler_driver.clear_int(int_id)
+
+        self.int_controller.clear_int(int_id)
     }
 }
