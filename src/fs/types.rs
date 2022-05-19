@@ -190,7 +190,7 @@ impl File for DummyLink {
             open_mode: OpenMode::READ,
             file_size: 0,
             path: self.self_path.clone(),
-            inode: self.hash_path(),
+            inode: self.self_path.hash(),
             fs: Arc::downgrade(&self.vfs),
         })
     }
@@ -204,27 +204,4 @@ impl LinkFile for DummyLink {
     fn write_link(&self, _path: &Path) -> Result<(), ErrorNum> {
         Err(ErrorNum::EPERM)
     }
-}
-
-impl DummyLink {
-    fn hash_path(&self) -> u32 {
-        let mut res = 0u32;
-
-        for c in self.self_path.components.iter() {
-            res = hash_str(c).wrapping_add(res.wrapping_shl(6)).wrapping_add(res.wrapping_shl(16)).wrapping_sub(res);
-        }
-
-        res
-    }
-}
-
-/// Using the sbdm
-/// res * 65599 + b
-fn hash_str(src: &String) -> u32 {
-    let mut res = 0u32;
-    for b in src.bytes() {
-        res = (b as u32).wrapping_add(res.wrapping_shl(6)).wrapping_add(res.wrapping_shl(16)).wrapping_sub(res);
-    }
-
-    res
 }

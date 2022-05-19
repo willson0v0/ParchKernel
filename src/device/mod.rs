@@ -14,5 +14,8 @@ pub use device_tree::{
 use crate::utils::RWLock;
 
 pub fn init() {
-    DEVICE_MANAGER.acquire_r().init_all().unwrap(); // invoke it to trigger initialzation process
+    for (id, driver) in DEVICE_MANAGER.acquire_r().get_device_list().iter() {
+        debug!("driver {:?}, uuid {}", driver, id);
+    }
+    milestone!("Device manager initialized.");
 }

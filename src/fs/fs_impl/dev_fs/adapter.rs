@@ -20,6 +20,7 @@ impl Debug for Adapter {
 
 impl Adapter {
     pub fn new(unit_name: &str, fs: Weak<dyn VirtualFileSystem>, open_mode: OpenMode) -> Self {
+        debug!("Creating fs adapter for {}", unit_name);
         let device_mgr = DEVICE_MANAGER.acquire_r();
         let dev_tree = device_mgr.get_dev_tree();
         let dev_node = dev_tree.search_name(unit_name).unwrap();

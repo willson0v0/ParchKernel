@@ -8,6 +8,7 @@ use crate::device::device_tree::DTBPropertyValue;
 use crate::{device::device_manager::Driver, mem::PhysAddr};
 use crate::utils::{ErrorNum, RWLock, UUID};
 use core::fmt::Debug;
+use core::mem::size_of;
 
 /// Driver for google goldfish rtc device. Typically mapped at 0x101000
 /// 0x00 TIME_LOW
@@ -21,6 +22,7 @@ pub struct RTC {
 
 enum_with_tryfrom_usize!{
     #[repr(usize)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub enum IOCtlOp {
         ReadTime = 1,
     }
@@ -32,12 +34,20 @@ impl Debug for RTC {
     }
 }
 
+impl RTC {
+    fn read_time(&self) -> u64 {
+        let time_low: u32 = unsafe{(self.addr + 0x00).read_volatile()};
+        let time_hi: u32 = unsafe{(self.addr + 0x04).read_volatile()};
+        time_low as u64 + ((time_hi as u64) << 32)
+    }
+}
+
 impl Driver for RTC {
     fn new(dev_tree: DeviceTree) -> Result<Vec<(UUID, Arc<(dyn Driver + 'static)>)>, ErrorNum> where Self: Sized {
         let mut res = Vec::new();
-        let nodes = dev_tree.search("compatible", DTBPropertyValue::CStr("google,goldfish-rtc".to_string()))?;
+        let nodes = dev_tree.serach_compatible("google,goldfish-rtc")?;
         for node in nodes {
-            let mut node_r = node.acquire_r();
+            let node_r = node.acquire_r();
             let uuid = node_r.driver;
             verbose!("RTC Driver found device: {}, uuid {}.", node_r.unit_name, uuid);
             let reg = node_r.reg_value()?;
@@ -64,12 +74,11 @@ impl Driver for RTC {
         let op: IOCtlOp = op.try_into()?;
         // sanity check
         let _sanity: () = *data.downcast().unwrap();
-        
-        let time_low: u32 = unsafe{(self.addr + 0x00).read_volatile()};
-        let time_hi: u32 = unsafe{(self.addr + 0x04).read_volatile()};
-        let result: u64 = time_low as u64 + ((time_hi as u64) << 32);
-
-        return Ok(Box::new(result))
+        if op == IOCtlOp::ReadTime {
+            Ok(Box::new(self.read_time()))
+        } else {
+            Err(ErrorNum::ENOSYS)
+        }
     }
 
     fn as_any<'a>(self: alloc::sync::Arc<Self>) -> alloc::sync::Arc<dyn core::any::Any + Send + Sync> {
@@ -93,6 +102,10 @@ impl Driver for RTC {
     }
 
     fn read(&self, length: usize) -> Result<alloc::vec::Vec<u8>, ErrorNum> {
-        Err(ErrorNum::EPERM)
+        if length == size_of::<u64>() {
+            Ok(self.read_time().to_le_bytes().to_vec())
+        } else {
+            Err(ErrorNum::EPERM)
+        }
     }
 }

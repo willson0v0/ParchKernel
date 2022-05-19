@@ -81,6 +81,6 @@ impl Display for UUID {
         let p2 = (self.0 >> 64) & 0xFFFF;
         let p3 = (self.0 >> 80) & 0xFFFF;
         let p4 = (self.0 >> 96) & 0xFFFFFFFF;
-        write!(f, "{:8x}-{:4x}-{:4x}-{:4x}-{:12x}", p4, p3, p2, p1, p0)
+        write!(f, "{:08x}-{:04x}-{:04x}-{:04x}-{:012x}", p4, p3, p2, p1, p0)
     }
 }

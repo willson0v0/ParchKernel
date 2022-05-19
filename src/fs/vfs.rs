@@ -189,6 +189,25 @@ impl Path {
         }
         Self{components: new_component.into()}
     }
+    
+    pub fn hash(&self) -> u32 {
+        let mut res = 0u32;
+        for c in self.components.iter() {
+            res = Self::hash_str(c).wrapping_add(res.wrapping_shl(6)).wrapping_add(res.wrapping_shl(16)).wrapping_sub(res);
+        }
+        res
+    }
+
+
+    /// Using the sbdm
+    /// res * 65599 + b
+    fn hash_str(src: &String) -> u32 {
+        let mut res = 0u32;
+        for b in src.bytes() {
+            res = (b as u32).wrapping_add(res.wrapping_shl(6)).wrapping_add(res.wrapping_shl(16)).wrapping_sub(res);
+        }
+        res
+    }
 }
 
 impl From<&str> for Path {

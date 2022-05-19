@@ -185,11 +185,38 @@ impl DirFile for DevFolder {
     }
 
     fn read_dirent(&self) -> Result<alloc::vec::Vec<crate::fs::Dirent>, ErrorNum> {
-        Ok(vec![
-            Dirent{ inode: 0, permission: Permission::default(), f_type: crate::fs::types::FileType::LINK, f_name: ".".to_string() },
-            Dirent{ inode: 0, permission: Permission::default(), f_type: crate::fs::types::FileType::LINK, f_name: "..".to_string() },
-            Dirent{ inode: 0, permission: Permission::default(), f_type: crate::fs::types::FileType::CHAR, f_name: "pts".to_string() },
-            Dirent{ inode: 0, permission: Permission::ro(), f_type: crate::fs::types::FileType::CHAR, f_name: "rtc0".to_string() },
-        ])
+        let device_list = Self::compatible_devices();
+        let mut result: Vec<Dirent> = Vec::new();
+        for (name, uuid) in device_list.iter() {
+            result.push(Dirent {
+                inode: uuid.0 as u32,
+                permission: Permission::default(),
+                f_type: crate::fs::types::FileType::CHAR,
+                f_name: name.to_owned(),
+            });
+        }
+        result.push(
+            Dirent{ 
+                inode: Path::new("/dev/.").unwrap().hash(), 
+                permission: Permission::default(), 
+                f_type: crate::fs::types::FileType::LINK, 
+                f_name: ".".to_string() }
+        );
+        result.push(
+            Dirent{ 
+                inode: Path::new("/dev/..").unwrap().hash(), 
+                permission: Permission::default(), 
+                f_type: crate::fs::types::FileType::LINK, 
+                f_name: "..".to_string() }
+        );
+        result.push(
+            Dirent{ 
+                inode: Path::new("/dev/pts").unwrap().hash(), 
+                permission: Permission::default(), 
+                f_type: crate::fs::types::FileType::LINK, 
+                f_name: "pts".to_string() }
+        );
+
+        Ok(result)
     }
 }
