@@ -2,7 +2,10 @@ mod device_manager;
 pub mod drivers;
 mod device_tree;
 
-pub use device_manager::DEVICE_MANAGER;
+pub use device_manager::{
+    DEVICE_MANAGER,
+    Driver
+};
 pub use device_tree::{
     DTBNode,
     DeviceTree
@@ -11,5 +14,5 @@ pub use device_tree::{
 use crate::utils::RWLock;
 
 pub fn init() {
-    DEVICE_MANAGER.acquire_r(); // invoke it to trigger initialzation process
+    DEVICE_MANAGER.acquire_r().init_all().unwrap(); // invoke it to trigger initialzation process
 }

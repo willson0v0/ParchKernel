@@ -10,10 +10,10 @@ use bitflags::*;
 
 pub struct UART {
     base_address: PhysAddr,
-    clock_freq: u64,
+    clock_freq: u32,
     operator: SpinMutex<UARTOperator>,
     buffer_r: SpinMutex<VecDeque<u8>>,
-    buffer_w: SpinMutex<VecDeque<u8>>
+    buffer_w: SpinMutex<VecDeque<u8>>,
 }
 
 struct UARTOperator{
@@ -25,8 +25,10 @@ enum_with_tryfrom_usize!{
     #[repr(usize)]
     pub enum IOCtlOp {
         WriteByte = 1,
-        ReadByte = 2,
-        Config = 3,
+        WriteArr = 2,
+        ReadByte = 3,
+        Config = 4,
+        Sync = 5,
     }
 }
 
@@ -57,7 +59,7 @@ pub enum StopBit {
 
 #[derive(Copy, Clone, Debug)]
 pub struct Config {
-    pub baud_rate: u64,
+    pub baud_rate: u32,
     pub data_bits: DataBits,
     pub parity: Parity,
     pub stop_bits: StopBit,
@@ -83,14 +85,18 @@ pub enum RCVRLength {
 
 pub enum IOCtlParam {
     Write(u8),
+    WriteArr(Vec<u8>),
     Read,
     Config(Config),
+    Sync,
 }
 
 pub enum IOCtlRes {
     Write,
+    WriteArr,
     Read(u8),
-    Config
+    Config,
+    Sync,
 }
 
 #[repr(u8)]
@@ -141,32 +147,6 @@ impl core::convert::TryFrom<u8> for IntStatus {
     }
 }
 
-impl IOCtlParam {
-    pub fn write_byte(&self) -> Result<u8, ErrorNum> {
-        match *self {
-            IOCtlParam::Write(b) => Ok(b),
-            IOCtlParam::Config(_) => Err(ErrorNum::EBADTYPE),
-            IOCtlParam::Read => Err(ErrorNum::EBADTYPE),
-        }
-    }
-
-    pub fn config(&self) -> Result<Config, ErrorNum> {
-        match *self {
-            IOCtlParam::Write(_) => Err(ErrorNum::EBADTYPE),
-            IOCtlParam::Config(c) => Ok(c),
-            IOCtlParam::Read => Err(ErrorNum::EBADTYPE),
-        }
-    }
-
-    pub fn read(&self) -> Result<(), ErrorNum> {
-        match *self {
-            IOCtlParam::Write(_) => Err(ErrorNum::EBADTYPE),
-            IOCtlParam::Config(_) => Err(ErrorNum::EBADTYPE),
-            IOCtlParam::Read => Ok(()),
-        }
-    }
-}
-
 impl UARTOperator {
     fn transmitter_holding_buffer          (&self) -> PhysAddr { self.base_address + 0x0 }
     fn receiver_buffer                     (&self) -> PhysAddr { self.base_address + 0x0 }
@@ -207,7 +187,7 @@ impl UARTOperator {
         }
     }
 
-    pub fn config(&mut self, clock_freq: u64, param: Config) -> Result<(), ErrorNum> {
+    pub fn config(&mut self, clock_freq: u32, param: Config) -> Result<(), ErrorNum> {
         // check divisor
         if clock_freq % (16 * param.baud_rate) != 0 {
             return Err(ErrorNum::EINVAL)
@@ -299,17 +279,55 @@ impl Debug for UART {
     }
 }
 
+impl UART {
+    fn write_byte(&self, b: u8) {
+        self.buffer_w.acquire().push_back(b);
+    }
+
+    fn write_arr(&self, arr: Vec<u8>) {
+        // operator first, buffer next
+        let operator = self.operator.acquire();
+        let mut buffer_w = self.buffer_w.acquire();
+        buffer_w.extend(arr);
+        operator.dump_w_buffer(&mut buffer_w);
+    }
+
+    fn read_byte(&self) -> u8 { 
+        let operator = self.operator.acquire();
+        // check buffer
+        let mut buffer_r = self.buffer_r.acquire();
+        if !buffer_r.is_empty() {
+            return buffer_r.pop_front().unwrap();
+        }
+        drop(buffer_r);
+        // check fifo, hold operator in case kernel need read
+        if let Ok(b) = operator.read() {
+            return b;
+        }
+        let core = get_processor();
+        loop {
+            if core.current().is_some() {
+                // sleep if is user program
+                core.suspend_switch();
+            }
+            if let Ok(b) = operator.read() {
+                return b;
+            }
+        }
+    }
+}
+
 impl Driver for UART {
     fn new(dev_tree: crate::device::DeviceTree) -> Result<alloc::vec::Vec<(UUID, alloc::sync::Arc<dyn Driver>)>, crate::utils::ErrorNum> where Self: Sized {
         let mut res = Vec::new();
         
         let compatible = dev_tree.serach_compatible("ns16550a")?;
         for c in compatible {
-            let uuid = UUID::new();
             let node = c.acquire_r();
+            let uuid = node.driver;
             verbose!("Creating Driver instance for {} with uuid {}.", node.unit_name, uuid);
             let base_address: PhysAddr = node.reg_value()?[0].address.into();
-            let clock_freq = node.get_value("clock-frequency")?.get_u64()?;
+            let clock_freq = node.get_value("clock-frequency")?.get_u32()?;
             let driver = Self {
                 base_address,
                 clock_freq,
@@ -341,54 +359,36 @@ impl Driver for UART {
         // Do Nothing.
     }
 
-    fn ioctl(&self, op: usize, data: alloc::boxed::Box<dyn core::any::Any>) -> Result<alloc::boxed::Box<dyn core::any::Any>, crate::utils::ErrorNum> {
-        let mut operator = self.operator.acquire();
+    fn ioctl(&self, op: usize, data: alloc::boxed::Box<dyn core::any::Any>) -> Result<alloc::boxed::Box<dyn core::any::Any + '_>, crate::utils::ErrorNum> {
         let op = IOCtlOp::try_from(op)?;
         let param: Box<IOCtlParam> = data.downcast().unwrap();
-        match op {
-            IOCtlOp::WriteByte => {
-                let b = param.write_byte()?;
-                self.buffer_w.acquire().push_back(b);
+        match (op, *param) {
+            (IOCtlOp::WriteByte, IOCtlParam::Write(b)) => {
+                self.write_byte(b);
                 return Ok(Box::new(IOCtlRes::Write))
             },
-            IOCtlOp::ReadByte => {
-                // type check
-                param.read()?;
-                // check buffer
-                let mut buffer_r = self.buffer_r.acquire();
-                if !buffer_r.is_empty() {
-                    return Ok(Box::new(IOCtlRes::Read(buffer_r.pop_front().unwrap())));
-                }
-                drop(buffer_r);
-                // check fifo, hold operator in case kernel need read
-                if let Ok(b) = operator.read() {
-                    return Ok(Box::new(IOCtlRes::Read(b)));
-                }
-                let core = get_processor();
-                loop {
-                    if core.current().is_some() {
-                        // sleep if is user program
-                        core.suspend_switch();
-                    }
-                    if let Ok(b) = operator.read() {
-                        return Ok(Box::new(IOCtlRes::Read(b)));
-                    }
-                }
+            (IOCtlOp::WriteArr, IOCtlParam::WriteArr(arr)) => {
+                self.write_arr(arr);
+                return Ok(Box::new(IOCtlRes::Write))
             },
-            IOCtlOp::Config => {
-                let param = param.config()?;
-                operator.config(self.clock_freq, param)?;
+            (IOCtlOp::ReadByte, IOCtlParam::Read) => {
+                return Ok(Box::new(IOCtlRes::Read(self.read_byte())));
+            },
+            (IOCtlOp::Config, IOCtlParam::Config(param)) => {
+                self.operator.acquire().config(self.clock_freq, param)?;
                 return Ok(Box::new(IOCtlRes::Config));
             },
+            (IOCtlOp::Sync, IOCtlParam::Sync) => {
+                let operator = self.operator.acquire();
+                operator.deplete_r_buffer(&mut self.buffer_r.acquire());
+                operator.dump_w_buffer(&mut self.buffer_w.acquire());
+
+                return Ok(Box::new(IOCtlRes::Sync));
+            },
+            _ => {
+                return Err(ErrorNum::EINVAL)
+            }
         }
-    }
-
-    fn as_any<'a>(self: alloc::sync::Arc<Self>) -> alloc::sync::Arc<dyn core::any::Any + Send + Sync> {
-        self
-    }
-
-    fn as_driver<'a>(self: alloc::sync::Arc<Self>) -> alloc::sync::Arc<dyn Driver> {
-        self
     }
 
     fn handle_int(&self) -> Result<(), ErrorNum> {
@@ -403,7 +403,29 @@ impl Driver for UART {
         Ok(())
     }
 
+    fn as_any<'a>(self: alloc::sync::Arc<Self>) -> alloc::sync::Arc<dyn core::any::Any + Send + Sync> {
+        self
+    }
+
+    fn as_driver<'a>(self: alloc::sync::Arc<Self>) -> alloc::sync::Arc<dyn Driver> {
+        self
+    }
+
     fn as_int_controller<'a>(self: Arc<Self>) -> Result<Arc<dyn crate::device::device_manager::IntController>, ErrorNum> {
         Err(ErrorNum::ENOTINTC)
+    }
+
+    fn write(&self, data: alloc::vec::Vec::<u8>) -> Result<usize, crate::utils::ErrorNum> {
+        let len = data.len();
+        self.write_arr(data);
+        Ok(len)
+    }
+
+    fn read(&self, length: usize) -> Result<alloc::vec::Vec<u8>, ErrorNum> {
+        let mut res = Vec::new();
+        while res.len() < length {
+            res.push(self.read_byte());
+        }
+        Ok(res)
     }
 }

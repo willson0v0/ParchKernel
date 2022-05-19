@@ -140,9 +140,6 @@ extern "C" fn genesis_s() -> ! {
         mem::hart_init();
         
         device::init();
-
-        interrupt::init();
-        interrupt::init_hart();
         
         println!("\r\n\n\n\nParch OS\n");
         println!("Ver\t: {}", version::VERSION);

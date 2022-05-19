@@ -50,10 +50,6 @@ impl File for RootDir {
         Err(ErrorNum::EBADTYPE)
     }
 
-    fn as_mount<'a>(self: Arc<Self>) -> Result<Arc<dyn crate::fs::MountPoint + 'a>, ErrorNum> where Self: 'a {
-        Err(ErrorNum::EBADTYPE)
-    }
-
     fn as_file<'a>(self: alloc::sync::Arc<Self>) -> alloc::sync::Arc<dyn File + 'a> where Self: 'a {
         self
     }
@@ -143,13 +139,5 @@ impl DirFile for RootDir {
             result.push(dentry);
         }
         Ok(result)
-    }
-
-    fn register_mount(&self, dentry_name: alloc::string::String, uuid: crate::utils::UUID) -> Result<(), ErrorNum> {
-        Err(ErrorNum::EPERM)
-    }
-
-    fn register_umount(&self, dentry_name: alloc::string::String) -> Result<crate::utils::UUID, ErrorNum> {
-        Err(ErrorNum::EPERM)
     }
 }

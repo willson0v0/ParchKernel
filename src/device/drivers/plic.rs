@@ -1,5 +1,6 @@
 use alloc::boxed::Box;
 use alloc::sync::Arc;
+use alloc::vec::Vec;
 use crate::device::DeviceTree;
 use crate::mem::PhysAddr;
 use crate::process::get_hart_id;
@@ -110,10 +111,10 @@ impl PLICOperator {
 
 impl Driver for PLIC {
     fn new(dev_tree: crate::device::DeviceTree) -> Result<alloc::vec::Vec<(crate::utils::UUID, alloc::sync::Arc<dyn Driver>)>, crate::utils::ErrorNum> where Self: Sized {
-        match dev_tree.serach_compatible("ns16550a")?.as_slice() {
+        match dev_tree.serach_compatible("riscv,plic0")?.as_slice() {
             [node_guard] => {
-                let uuid = UUID::new();
                 let node = node_guard.acquire_r();
+                let uuid = node.driver;
                 verbose!("Creating driver instance for plic, unit name {}, uuid {}", node.unit_name, uuid);
                 // TODO: implement mem access guard?
                 let base_address: PhysAddr = node.reg_value()?[0].address.into();
@@ -191,6 +192,14 @@ impl Driver for PLIC {
 
     fn as_int_controller<'a>(self: Arc<Self>) -> Result<Arc<dyn crate::device::device_manager::IntController>, ErrorNum> {
         Ok(self)
+    }
+    
+    fn write(&self, _data: alloc::vec::Vec::<u8>) -> Result<usize, crate::utils::ErrorNum> {
+        Err(ErrorNum::EPERM)
+    }
+
+    fn read(&self, _length: usize) -> Result<Vec<u8>, ErrorNum> {
+        Err(ErrorNum::EPERM)
     }
 }
 

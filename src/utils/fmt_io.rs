@@ -5,8 +5,10 @@ use alloc::{string::String, sync::Arc};
 
 use crate::{process::{push_intr_off, pop_intr_off, get_hart_id, get_processor}, utils::time::{get_time, get_time_ms, get_time_second}, println, print, print_no_lock};
 
-use super::{UART0, SpinMutex, Mutex};
+use super::{SpinMutex, Mutex};
 use core::fmt::{self, Write};
+
+use super::K_PRINT_HANDLER;
 
 // ======================== color constants ========================
 const FG_BLACK      :u8 = 30;
@@ -57,7 +59,8 @@ lazy_static!{
 
 // ======================== functions ========================
 pub fn k_puts(ch: &str) {
-	UART0.write_str_synced(ch);
+	// UART0.write_str_synced(ch);
+    K_PRINT_HANDLER.acquire().k_puts(ch);
 }
 
 struct  OutputFormatter;
@@ -187,82 +190,4 @@ pub fn log(log_level: LogLevel, args: fmt::Arguments) {
             }
         },
     }
-}
-
-
-pub fn get_char() -> char {
-    super::UART0.read()
-}
-
-pub fn get_byte() -> u8 {
-    super::UART0.read_byte()
-}
-
-pub fn get_line() -> String {
-    let mut line =  String::new();
-
-    /// hard limit
-    while line.len() < 1024 {
-        let c = get_char();
-        if c == '\n' {
-            return line;
-        } else {
-            line.push(c);
-        }
-    }
-
-    line
-}
-
-pub fn k_get_char() -> char {
-    super::UART0.read_synced()
-}
-
-pub fn k_get_byte() -> u8 {
-    super::UART0.read_byte_synced()
-}
-
-pub fn k_get_line() -> String {
-    let mut line =  String::new();
-
-    /// hard limit
-    while line.len() < 1024 {
-        let c = k_get_char();
-        if c == '\n' {
-            return line;
-        } else {
-            line.push(c);
-        }
-    }
-
-    line
-}
-
-pub fn get_term_size() -> (usize, usize) {
-    print!("\x1b[s\x1b[999;999H\x1b[6n");
-    k_get_byte(); // \x1b
-    k_get_byte(); // '['
-    let mut height = 0usize;
-    loop {
-        let b = k_get_byte();
-        if b >= b'0' && b <= b'9' {
-            height *= 10;
-            height += (b - b'0') as usize;
-        } else {
-            break;
-        }
-    }
-    let mut width = 0usize;
-    loop {
-        let b = k_get_byte();
-        if b >= b'0' && b <= b'9' {
-            width *= 10;
-            width += (b - b'0') as usize;
-        } else {
-            break;
-        }
-    }
-    
-    print!("\x1b[u");
-    (height.into(), width.into())
 }

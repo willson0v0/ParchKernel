@@ -36,8 +36,8 @@ impl Driver for PowerOff {
     fn new(dev_tree: crate::device::DeviceTree) -> Result<alloc::vec::Vec<(crate::utils::UUID, alloc::sync::Arc<dyn Driver>)>, crate::utils::ErrorNum> where Self: Sized {
         match dev_tree.serach_compatible("syscon-poweroff")?.as_slice() {
             [node_guard] => {
-                let uuid = UUID::new();
                 let node = node_guard.acquire_r();
+                let uuid = node.driver;
                 let phandle = match node.get_value("regmap")? {
                     DTBPropertyValue::UInt32(phandle) => phandle,
                     _ => return Err(ErrorNum::EBADDTB)
@@ -95,5 +95,13 @@ impl Driver for PowerOff {
 
     fn as_int_controller<'a>(self: alloc::sync::Arc<Self>) -> Result<alloc::sync::Arc<dyn crate::device::device_manager::IntController>, crate::utils::ErrorNum> {
         Err(ErrorNum::ENOTINTC)
+    }
+
+    fn write(&self, data: alloc::vec::Vec::<u8>) -> Result<usize, crate::utils::ErrorNum> {
+        Err(ErrorNum::EPERM)
+    }
+
+    fn read(&self, length: usize) -> Result<alloc::vec::Vec<u8>, ErrorNum> {
+        Err(ErrorNum::EPERM)
     }
 }

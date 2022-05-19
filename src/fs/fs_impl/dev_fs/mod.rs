@@ -1,6 +1,5 @@
 mod fs;
-mod pts;
-mod drivers;
+mod adapter;
 
 pub use fs::DEV_FS;
-pub use pts::UartPTS;
+pub use adapter::Adapter;

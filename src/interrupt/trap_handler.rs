@@ -9,8 +9,8 @@ use riscv::register::{scause::{   // s cause register
     }, sepc, sip, sstatus::{self, SPP}, stval, stvec};
 
 use super::PLIC0;
-use crate::{config::{UART0_IRQ, TRAMPOLINE_ADDR, PROC_K_STACK_ADDR, PROC_K_STACK_SIZE, TRAP_CONTEXT_ADDR, PROC_U_STACK_ADDR, PROC_U_STACK_SIZE, U_TRAMPOLINE_ADDR, PHYS_END_ADDR}, process::{get_processor, ProcessStatus, intr_off, get_hart_id, intr_on, def_handler::def_ignore, SignalNum}, mem::{VirtAddr, PhysPageNum, PhysAddr, PPNRange, PageTable, PTEFlags}, interrupt::trap_context::TrapContext, syscall::{syscall, syscall_num::SYSCALL_EXEC}, utils::Mutex};
-use crate::utils::UART0;
+use crate::{config::{UART0_IRQ, TRAMPOLINE_ADDR, PROC_K_STACK_ADDR, PROC_K_STACK_SIZE, TRAP_CONTEXT_ADDR, PROC_U_STACK_ADDR, PROC_U_STACK_SIZE, U_TRAMPOLINE_ADDR, PHYS_END_ADDR}, interrupt::trap_context::TrapContext, mem::{VirtAddr, PhysPageNum, PhysAddr, PPNRange, PageTable, PTEFlags}, process::{get_processor, ProcessStatus, intr_off, get_hart_id, intr_on, def_handler::def_ignore, SignalNum}, syscall::{syscall, syscall_num::SYSCALL_EXEC}, utils::{Mutex, RWLock}};
+use crate::device::DEVICE_MANAGER;
 
 /// Set trap entry to kernel trap handling function.
 pub fn set_kernel_trap_entry() {
@@ -35,18 +35,19 @@ pub fn kernel_trap() {
     match scause.cause() {
         // PLIC interrupt
         Trap::Interrupt(Interrupt::SupervisorExternal) => {
-            match PLIC0.plic_claim() {
-                UART0_IRQ => {
-                    UART0.sync();
-                    PLIC0.plic_complete(UART0_IRQ);
-                },
-                0 => {
-                    // do nothing
-                },
-                unknown_ext => {
-                    panic!("Unknown external interrupt 0x{:x}", unknown_ext)
-                }
-            }
+            DEVICE_MANAGER.acquire_r().handle_interrupt().unwrap();
+            // match PLIC0.plic_claim() {
+            //     UART0_IRQ => {
+            //         UART0.sync();
+            //         PLIC0.plic_complete(UART0_IRQ);
+            //     },
+            //     0 => {
+            //         // do nothing
+            //     },
+            //     unknown_ext => {
+            //         panic!("Unknown external interrupt 0x{:x}", unknown_ext)
+            //     }
+            // }
         },
         Trap::Interrupt(Interrupt::SupervisorSoft) => {
             // verbose!("Supervisor Soft Interrupt");
@@ -184,18 +185,19 @@ pub fn user_trap() -> ! {
             },
             // PLIC interrupt
             Trap::Interrupt(Interrupt::SupervisorExternal) => {
-                match PLIC0.plic_claim() {
-                    UART0_IRQ => {
-                        UART0.sync();
-                        PLIC0.plic_complete(UART0_IRQ);
-                    },
-                    0 => {
-                        // do nothing
-                    },
-                    unknown_ext => {
-                        panic!("Unknown external interrupt 0x{:x}", unknown_ext)
-                    }
-                }
+                DEVICE_MANAGER.acquire_r().handle_interrupt().unwrap();
+                // match PLIC0.plic_claim() {
+                //     UART0_IRQ => {
+                //         UART0.sync();
+                //         PLIC0.plic_complete(UART0_IRQ);
+                //     },
+                //     0 => {
+                //         // do nothing
+                //     },
+                //     unknown_ext => {
+                //         panic!("Unknown external interrupt 0x{:x}", unknown_ext)
+                //     }
+                // }
             },
             Trap::Exception(Exception::InstructionPageFault)    |
             Trap::Exception(Exception::LoadPageFault)           |

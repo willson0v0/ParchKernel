@@ -20,7 +20,6 @@ pub use types::{
     DirFile     ,
     CharFile    ,
     FIFOFile    ,
-    MountPoint  ,
     DummyLink   ,
     Cursor,
     Dirent

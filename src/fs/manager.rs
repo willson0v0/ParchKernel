@@ -3,6 +3,7 @@ use alloc::collections::BTreeMap;
 use alloc::sync::Arc;
 use crate::config::{MAX_LINK_RECURSE};
 use crate::utils::{SpinRWLock, ErrorNum, UUID};
+use super::DirFile;
 use super::types::{FileType, Permission};
 use super::{Path, VirtualFileSystem, File, vfs::OpenMode, LinkFile};
 
@@ -21,7 +22,28 @@ impl MountManager {
 
 pub struct MountManagerInner {
     root_fs: Arc<dyn VirtualFileSystem>,
-    fs: BTreeMap<UUID, Arc<dyn VirtualFileSystem>>
+    fs: BTreeMap<UUID, Arc<dyn VirtualFileSystem>>,
+    mount_point: BTreeMap<MountPoint, UUID>
+}
+
+#[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Copy, Clone)]
+struct MountPoint {
+    pub fs: UUID,
+    pub inode: u32,
+}
+
+impl MountPoint {
+    pub fn match_dir(&self, dir: Arc<dyn DirFile>) -> Result<bool, ErrorNum> {
+        Ok(*self == Self::from_dir(dir)?)
+    }
+
+    pub fn from_dir(dir: Arc<dyn DirFile>) -> Result<Self, ErrorNum> {
+        let stat = dir.stat()?;
+        Ok(Self {
+            fs: stat.fs.upgrade().unwrap().get_uuid(),
+            inode: stat.inode,
+        })
+    }
 }
 
 impl MountManagerInner {
@@ -30,7 +52,8 @@ impl MountManagerInner {
         fs.insert(root_fs.get_uuid(), root_fs.clone());
         Self {
             root_fs,
-            fs
+            fs,
+            mount_point: BTreeMap::new(),
         }
     }
 
@@ -50,17 +73,20 @@ impl MountManagerInner {
         while !path.is_root() {
             verbose!("Opening {:?} -> {:?}", lookup, path);
             if let Ok(dir) = lookup.clone().as_dir() {
-                lookup = dir.open_entry(&path.components[0], mode)?;
-                path = path.strip_head();
+                let mp = MountPoint::from_dir(dir.clone())?;
+                if self.mount_point.contains_key(&mp) {
+                    verbose!("Following mount.");
+                    lookup = self.get_fs(*self.mount_point.get(&mp).unwrap()).unwrap().root_dir(mode)?.as_file();
+                } else {
+                    lookup = dir.open_entry(&path.components[0], mode)?;
+                    path = path.strip_head();
+                }
             } else if let Ok(link) = lookup.clone().as_link() {
                 if mode.contains(OpenMode::NO_FOLLOW) {
                     return Err(ErrorNum::ENOENT)
                 }
                 verbose!("Following link.");
                 lookup = self.open_path_inner(self.root_fs.root_dir(mode)?.as_file(), &link.read_link()?, mode, recurse_count + 1)?;
-            } else if let Ok(mount) = lookup.clone().as_mount() {
-                verbose!("Following mount.");
-                lookup = self.get_fs(mount.get_uuid())?.root_dir(mode)?.as_file();
             } else {
                 return Err(ErrorNum::ENOENT)
             }
@@ -71,24 +97,38 @@ impl MountManagerInner {
                 lookup = self.open_path_inner(self.root_fs.root_dir(mode)?.as_file(), &link.read_link()?, mode, recurse_count+1)?;
             }
         }
-        if let Ok(mount) = lookup.clone().as_mount() {
-            lookup = self.get_fs(mount.get_uuid())?.root_dir(mode)?.as_file();
+        if let Ok(dir) = lookup.clone().as_dir() {
+            let mp = MountPoint::from_dir(dir)?;
+            if self.mount_point.contains_key(&mp) {
+                verbose!("Following mount.");
+                lookup = self.get_fs(*self.mount_point.get(&mp).unwrap()).unwrap().root_dir(mode)?.as_file();
+            }
         }
         Ok(lookup)
     }
 
     pub fn mount(&mut self, path: Path, vfs: Arc<dyn VirtualFileSystem>) -> Result<(), ErrorNum> {
-        let mount_dir = self.open(&path.strip_tail(), OpenMode::SYS)?.as_dir()?;
-        mount_dir.register_mount(path.last(), vfs.get_uuid())?;
+        let stat = self.open(&path, OpenMode::SYS)?.stat()?;
+        let mount_point = MountPoint{
+            fs: stat.fs.upgrade().unwrap().get_uuid(),
+            inode: stat.inode,
+        };
+        self.mount_point.insert(mount_point, vfs.get_uuid());
         self.fs.insert(vfs.get_uuid(), vfs);
         Ok(())
         // mount_vfs.mount(mount_dir, path.last(), vfs)
     }
 
     pub fn umount(&mut self, path: Path, _force: bool) -> Result<(), ErrorNum> {
-        let mount_dir = self.open(&path.strip_tail(), OpenMode::SYS)?.as_dir()?;
-        self.fs.remove(&mount_dir.register_umount(path.last())?).ok_or(ErrorNum::ENOENT)?;
-        Ok(())
+        let mount_dir = self.open(&path, OpenMode::SYS)?.as_dir()?;
+        let mp = MountPoint::from_dir(mount_dir)?;
+        if self.mount_point.contains_key(&mp) {
+            let fs = self.mount_point.remove(&mp).unwrap();
+            self.fs.remove(&fs).unwrap();
+            Ok(())
+        } else {
+            Err(ErrorNum::ENOENT)
+        }
     }
     
     pub fn make_file(&self, path: &Path, perm: Permission, f_type: FileType) -> Result<(), ErrorNum> {

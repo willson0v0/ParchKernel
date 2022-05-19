@@ -223,58 +223,34 @@ impl DeviceTree {
     }
 
     pub fn search_single(&self, field: &str, target: DTBPropertyValue) -> Result<Arc<SpinRWLock<DTBNode>>, ErrorNum> {
-        for n in self.nodes.iter() {
-            match self.search_inner(field, target.clone(), n.clone())?.as_slice() {
-                [] => continue,
-                [dev] => return Ok(dev.clone()),
-                _ => panic!("Found multiple result"),
-            }
+        match self.search(field, target)?.as_slice() {
+            [node] => Ok(node.clone()),
+            [] => Err(ErrorNum::ENXIO),
+            _ => Err(ErrorNum::EBADDTB)
         }
-        Err(ErrorNum::ENXIO)
     }
 
     pub fn search(&self, field: &str, target: DTBPropertyValue) -> Result<Vec<Arc<SpinRWLock<DTBNode>>>, ErrorNum> {
-        let mut res = Vec::new();
-        for n in self.nodes.iter() {
-            res.extend(self.search_inner(field, target.clone(), n.clone())?);
-        }
-        return Ok(res);
-    }
-
-    fn search_inner(&self, field: &str, target: DTBPropertyValue, root: Arc<SpinRWLock<DTBNode>>) -> Result<Vec<Arc<SpinRWLock<DTBNode>>>, ErrorNum> {
-        let mut res = Vec::new();
-        let root_guard = root.acquire_r();
-        if let Ok(val) = root_guard.get_value(field) {
-            if val.equals(&target)? {
-                res.push(root.clone());
+        self.generic_search(&|node| -> bool {
+            if let Ok(val) = node.acquire_r().get_value(field) {
+                return val.equals(&target).unwrap_or(false);
             }
-        }
-        for child in root_guard.children.iter() {
-            res.extend(self.search_inner(field, target.clone(), child.clone())?);
-        }
-        return Ok(res)
+            false
+        })
     }
 
     pub fn serach_compatible(&self, compatible: &str) -> Result<Vec<Arc<SpinRWLock<DTBNode>>>, ErrorNum> {
         let mut res = Vec::new();
-        for n in self.nodes.iter() {
-            res.extend(self.serach_compatible_inner(compatible, n.clone())?);
+        for child in self.nodes.iter() {
+            res.extend(self.general_search_inner(&|node| -> bool {
+                if let Ok(val) = node.acquire_r().get_value("compatible") {
+                    val.contains(compatible).unwrap_or(false)
+                } else {
+                    false
+                }
+            }, child.clone())?)
         }
         return Ok(res);
-    }
-
-    fn serach_compatible_inner(&self, compatible: &str, root: Arc<SpinRWLock<DTBNode>>) -> Result<Vec<Arc<SpinRWLock<DTBNode>>>, ErrorNum> {
-        let mut res = Vec::new();
-        let root_guard = root.acquire_r();
-        if let Ok(val) = root_guard.get_value("compatible") {
-            if val.contains(compatible)? {
-                res.push(root.clone());
-            }
-        }
-        for child in root_guard.children.iter() {
-            res.extend(self.serach_compatible_inner(compatible, child.clone())?);
-        }
-        return Ok(res)
     }
 
     pub fn hart_count(&self) -> usize {
@@ -283,20 +259,40 @@ impl DeviceTree {
 
     pub fn contains_field(&self, field: &str) -> Result<Vec<Arc<SpinRWLock<DTBNode>>>, ErrorNum> {
         let mut res = Vec::new();
-        for n in self.nodes.iter() {
-            res.extend(self.contains_field_inner(field, n.clone())?);
+        for child in self.nodes.iter() {
+            res.extend(self.general_search_inner(&|node| -> bool {
+                node.acquire_r().get_value(field).is_ok()
+            }, child.clone())?)
+            // res.extend(self.contains_field_inner(field, n.clone())?);
         }
         return Ok(res);
     }
 
-    fn contains_field_inner(&self, field: &str, root: Arc<SpinRWLock<DTBNode>>) -> Result<Vec<Arc<SpinRWLock<DTBNode>>>, ErrorNum> {
+    pub fn search_name(&self, name: &str) -> Result<Arc<SpinRWLock<DTBNode>>, ErrorNum> {
+        match self.generic_search(&|node| -> bool {
+            node.acquire_r().unit_name == name
+        })?.as_slice() {
+            [node] => Ok(node.clone()),
+            [] => Err(ErrorNum::ENXIO),
+            _ => Err(ErrorNum::EBADDTB)
+        }
+    }
+
+    pub fn generic_search(&self, criteria: &dyn Fn(Arc<SpinRWLock<DTBNode>>)->bool) -> Result<Vec<Arc<SpinRWLock<DTBNode>>>, ErrorNum> {
         let mut res = Vec::new();
-        let root_guard = root.acquire_r();
-        if root_guard.get_value(field).is_ok() {
+        for child in self.nodes.iter() {
+            res.extend(self.general_search_inner(criteria, child.clone())?)
+        }
+        return Ok(res);
+    }
+
+    fn general_search_inner(&self, criteria: &dyn Fn(Arc<SpinRWLock<DTBNode>>)->bool, root: Arc<SpinRWLock<DTBNode>>) -> Result<Vec<Arc<SpinRWLock<DTBNode>>>, ErrorNum> {
+        let mut res = Vec::new();
+        if criteria(root.clone()) {
             res.push(root.clone());
         }
-        for child in root_guard.children.iter() {
-            res.extend(self.contains_field_inner(field, child.clone())?);
+        for child in root.acquire_r().children.iter() {
+            res.extend(self.general_search_inner(criteria, child.clone())?);
         }
         return Ok(res)
     }
@@ -622,7 +618,7 @@ impl DTBNode {
     fn be_bytes_to_u64(slice: &[u8]) -> usize {
         debug_assert!(slice.len() <= 8);
         let mut buffer = [0u8; 8];
-        buffer[16-slice.len()..].copy_from_slice(slice);
+        buffer[8-slice.len()..].copy_from_slice(slice);
         usize::from_be_bytes(buffer)
     }
 }

@@ -62,10 +62,6 @@ impl File for SelfProcDir {
         })
     }
 
-    fn as_mount     <'a>(self: Arc<Self>) -> Result<Arc<dyn crate::fs::MountPoint   + 'a>, ErrorNum> where Self: 'a {
-        todo!()
-    }
-
     fn as_any       <'a>(self: Arc<Self>) -> Arc<dyn core::any::Any + Send + Sync + 'a> where Self: 'a {
         todo!()
     }
@@ -120,10 +116,6 @@ impl File for PidProcDir {
     }
 
     fn as_fifo<'a>(self: alloc::sync::Arc<Self>) -> Result<alloc::sync::Arc<dyn crate::fs::FIFOFile + 'a>, crate::utils::ErrorNum> where Self: 'a {
-        Err(ErrorNum::EBADTYPE)
-    }
-
-    fn as_mount<'a>(self: Arc<Self>) -> Result<Arc<dyn crate::fs::MountPoint   + 'a>, ErrorNum> where Self: 'a {
         Err(ErrorNum::EBADTYPE)
     }
 
@@ -216,14 +208,6 @@ impl DirFile for PidProcDir {
         } else {
             Err(ErrorNum::ENOENT)
         }
-    }
-
-    fn register_mount(&self, dentry_name: alloc::string::String, uuid: crate::utils::UUID) -> Result<(), ErrorNum> {
-        Err(ErrorNum::EPERM)
-    }
-
-    fn register_umount(&self, dentry_name: alloc::string::String) -> Result<crate::utils::UUID, ErrorNum> {
-        Err(ErrorNum::EPERM)
     }
 }
 

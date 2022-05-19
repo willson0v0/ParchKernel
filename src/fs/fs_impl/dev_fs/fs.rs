@@ -1,10 +1,11 @@
-use crate::{fs::{VirtualFileSystem, Path, File, DirFile, types::{FileStat, Permission}, OpenMode, Dirent, DummyLink}, utils::{ErrorNum, UUID}, config::RTC_ADDR};
+use crate::{config::RTC_ADDR, fs::{VirtualFileSystem, Path, File, DirFile, types::{FileStat, Permission}, OpenMode, Dirent, DummyLink}, utils::{ErrorNum, RWLock, UUID}};
 use core::fmt::Debug;
 
-use alloc::{sync::Arc, string::{ToString, String}};
+use alloc::{borrow::ToOwned, collections::BTreeMap, string::{ToString, String}, sync::Arc, vec::Vec};
 use lazy_static::*;
+use crate::device::{DEVICE_MANAGER, Driver};
 
-use super::{UartPTS, drivers::GoldFishRTC};
+use super::Adapter;
 
 lazy_static!{
     pub static ref DEV_FS: Arc<DevFS> = {
@@ -96,10 +97,6 @@ impl File for DevFolder {
         Err(ErrorNum::EBADTYPE)
     }
 
-    fn as_mount<'a>(self: Arc<Self>) -> Result<Arc<dyn crate::fs::MountPoint   + 'a>, ErrorNum> where Self: 'a {
-        Err(ErrorNum::EBADTYPE)
-    }
-
     fn as_file<'a>(self: Arc<Self>) -> Arc<dyn File + 'a> where Self: 'a {
         self
     }
@@ -123,17 +120,50 @@ impl File for DevFolder {
     }
 }
 
+impl DevFolder {
+    fn compatible_devices() -> Vec<(String, UUID)> {
+        let mut res = Vec::new();
+        let dev_tree = DEVICE_MANAGER.acquire_r().get_dev_tree();
+        let name_list = [
+            "google,goldfish-rtc",
+            "ns16550a",
+            "syscon-poweroff",
+            "syscon-reboot",
+            "riscv,plic0",
+            "virtio,mmio",
+        ];
+        for comp in name_list {
+            let mut driver_list: Vec<(String, UUID)> = dev_tree.serach_compatible(comp).unwrap().iter().map(
+                |node| -> (String, UUID) {
+                    let node_r = node.acquire_r();
+                    (node_r.unit_name.clone(), node_r.driver)
+                }
+            ).collect();
+            res.extend(driver_list);
+        }
+        res
+    }
+}
+
 impl DirFile for DevFolder {
     fn open_entry(&self, entry_name: &String, mode: crate::fs::OpenMode) -> Result<Arc<dyn File>, ErrorNum> {
-        if entry_name == "pts" {
-            Ok(Arc::new(UartPTS{mode}))
-        } else if entry_name == "rtc0" {
-            Ok(Arc::new(GoldFishRTC::new(RTC_ADDR)))
+        // TODO: no more hard-coding
+        let device_list = Self::compatible_devices();
+        let device_map: BTreeMap<String, UUID> = device_list.into_iter().collect();
+
+        if device_map.contains_key(entry_name) {
+            Ok(Arc::new(Adapter::new(entry_name, Arc::downgrade(&DEV_FS.clone().as_vfs()), mode)))
         } else if entry_name == "." {
             Ok(Arc::new(DummyLink{
                 vfs: DEV_FS.clone(),
                 link_dest: "/dev".into(),
                 self_path: "/dev/.".into(),
+            }))
+        } else if entry_name == "pts" {
+            Ok(Arc::new(DummyLink{
+                vfs: DEV_FS.clone(),
+                link_dest: "/dev/uart@10000000".into(),
+                self_path: "/dev/pts".into(),
             }))
         } else if entry_name == ".." {
             Ok(Arc::new(DummyLink{
@@ -161,13 +191,5 @@ impl DirFile for DevFolder {
             Dirent{ inode: 0, permission: Permission::default(), f_type: crate::fs::types::FileType::CHAR, f_name: "pts".to_string() },
             Dirent{ inode: 0, permission: Permission::ro(), f_type: crate::fs::types::FileType::CHAR, f_name: "rtc0".to_string() },
         ])
-    }
-
-    fn register_mount(&self, _dentry_name: alloc::string::String, _uuid: UUID) -> Result<(), ErrorNum> {
-        Err(ErrorNum::EPERM)
-    }
-
-    fn register_umount(&self, _dentry_name: alloc::string::String) -> Result<UUID, ErrorNum> {
-        Err(ErrorNum::EPERM)
     }
 }

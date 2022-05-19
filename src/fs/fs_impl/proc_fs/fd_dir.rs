@@ -47,10 +47,6 @@ impl File for FDDir {
         Err(ErrorNum::EBADTYPE)
     }
 
-    fn as_mount<'a>(self: alloc::sync::Arc<Self>) -> Result<alloc::sync::Arc<dyn crate::fs::MountPoint + 'a>, crate::utils::ErrorNum> where Self: 'a {
-        Err(ErrorNum::EBADTYPE)
-    }
-
     fn as_file<'a>(self: alloc::sync::Arc<Self>) -> alloc::sync::Arc<dyn File + 'a> where Self: 'a {
         self
     }
@@ -123,14 +119,6 @@ impl DirFile for FDDir {
         
         Ok(res)
     }
-
-    fn register_mount(&self, dentry_name: alloc::string::String, uuid: crate::utils::UUID) -> Result<(), crate::utils::ErrorNum> {
-        Err(ErrorNum::EPERM)
-    }
-
-    fn register_umount(&self, dentry_name: alloc::string::String) -> Result<crate::utils::UUID, crate::utils::ErrorNum> {
-        Err(ErrorNum::EPERM)
-    }
 }
 
 #[derive(Debug)]
@@ -173,10 +161,6 @@ impl File for FDLink {
     }
 
     fn as_fifo<'a>(self: alloc::sync::Arc<Self>) -> Result<alloc::sync::Arc<dyn crate::fs::FIFOFile + 'a>, crate::utils::ErrorNum> where Self: 'a {
-        Err(ErrorNum::EBADTYPE)
-    }
-
-    fn as_mount<'a>(self: alloc::sync::Arc<Self>) -> Result<alloc::sync::Arc<dyn crate::fs::MountPoint + 'a>, crate::utils::ErrorNum> where Self: 'a {
         Err(ErrorNum::EBADTYPE)
     }
 

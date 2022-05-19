@@ -119,10 +119,6 @@ impl File for PipeWriteEnd {
         Ok(self)
     }
 
-    fn as_mount <'a>(self: Arc<Self>) -> Result<Arc<dyn crate::fs::MountPoint + 'a>, crate::utils::ErrorNum> where Self: 'a {
-        Err(ErrorNum::EBADTYPE)
-    }
-
     fn as_file <'a>(self: Arc<Self>) -> Arc<dyn File + 'a> where Self: 'a {
         self
     }
@@ -185,10 +181,6 @@ impl File for PipeReadEnd {
 
     fn as_fifo <'a>(self: Arc<Self>) -> Result<Arc<dyn crate::fs::FIFOFile + 'a>, crate::utils::ErrorNum> where Self: 'a {
         Ok(self)
-    }
-
-    fn as_mount <'a>(self: Arc<Self>) -> Result<Arc<dyn crate::fs::MountPoint + 'a>, crate::utils::ErrorNum> where Self: 'a {
-        Err(ErrorNum::EBADTYPE)
     }
 
     fn as_file <'a>(self: Arc<Self>) -> Arc<dyn File + 'a> where Self: 'a {

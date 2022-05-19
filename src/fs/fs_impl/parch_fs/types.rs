@@ -1,4 +1,4 @@
-use crate::{mem::{PhysAddr, VMASegment}, utils::{SpinMutex, Mutex, ErrorNum, time::get_real_time_epoch, UUID}, fs::{RegularFile, File, BlockFile, DirFile, OpenMode, types::{FileType, Permission, Dirent}, Cursor, LinkFile, MountPoint}, config::PAGE_SIZE};
+use crate::{mem::{PhysAddr, VMASegment}, utils::{SpinMutex, Mutex, ErrorNum, time::get_real_time_epoch, UUID}, fs::{RegularFile, File, BlockFile, DirFile, OpenMode, types::{FileType, Permission, Dirent}, Cursor, LinkFile}, config::PAGE_SIZE};
 use super::{DIRECT_BLK_COUNT, INODE_SIZE, DENTRY_NAME_LEN, DENTRY_SIZE, fs::{ParchFS}, PFSBase, BAD_BLOCK, BAD_INODE};
 
 use core::mem::size_of;
@@ -251,10 +251,6 @@ impl File for PFSRegular {
         Err(ErrorNum::EBADTYPE)
     }
 
-    fn as_mount<'a>(self: Arc<Self>) -> Result<Arc<dyn crate::fs::MountPoint   + 'a>, ErrorNum> where Self: 'a {
-        Err(ErrorNum::EBADTYPE)
-    }
-
     fn as_file<'a>(self: alloc::sync::Arc<Self>) -> alloc::sync::Arc<dyn File + 'a> where Self: 'a {
         self
     }
@@ -386,10 +382,6 @@ impl File for PFSDir {
         Err(ErrorNum::EBADTYPE)
     }
 
-    fn as_mount     <'a>(self: Arc<Self>) -> Result<Arc<dyn crate::fs::MountPoint   + 'a>, ErrorNum> where Self: 'a {
-        Err(ErrorNum::EBADTYPE)
-    }
-
     fn as_file<'a>(self: alloc::sync::Arc<Self>) -> alloc::sync::Arc<dyn File + 'a> where Self: 'a {
         self
     }
@@ -433,9 +425,6 @@ impl DirFile for PFSDir {
                     },
                     FileType::LINK => {
                         Arc::new(PFSLink(SpinMutex::new("PFSFile lock", PFSLinkInner{base})))
-                    },
-                    FileType::MOUNT => {
-                        Arc::new(PFSMountPoint(SpinMutex::new("PFSFile lock", PFSMountPointInner{base})))
                     },
                     _ => {
                         panic!("Malformed fs, bad type")
@@ -536,164 +525,6 @@ impl DirFile for PFSDir {
         res.retain(|&x| x.inode != BAD_INODE);
         Ok(res.iter().map(|&x| x.into()).collect())
     }
-
-    fn register_mount(&self, entry_name: String, uuid: UUID) -> Result<(), ErrorNum> {
-        let inner = self.0.acquire();
-        let entries = inner.read_dirent_raw()?;
-        for (idx, e) in entries.iter().enumerate() {
-            if e.inode == BAD_INODE {
-                continue;
-            }
-            if e.name() == entry_name {
-                let _tgt_inode: INodeNo = e.inode.into();
-                let base = PFSBase::new(
-                    e.inode.into(), 
-                    inner.base.path.append(e.name().clone())?,
-                    OpenMode::SYS,
-                    inner.base.fs.clone()
-                )?;
-                let f_type = base.f_type()?;
-                match f_type {
-                    FileType::DIR => {
-                        // good, write back inode & entry
-                        let inode = inner.base.fs.upgrade().unwrap().get_inode(e.inode.into())?;
-                        let mut inode_inner = inode.acquire();
-                        inode_inner.access_time = get_real_time_epoch();
-                        inode_inner.mount_info.copy_from_slice(&uuid.to_bytes());
-                        inode_inner.f_type = PFSType::MOUNT;
-
-                        let mut new_dentry = e.clone();
-                        // preserve all other info
-                        new_dentry.f_type = PFSType::MOUNT;
-                        inner.write_dirent_at(new_dentry, idx)?;
-                        return Ok(());
-                    },
-                    _ => {
-                        return Err(ErrorNum::EBADTYPE);
-                    }
-                };
-            }
-        }
-        return Err(ErrorNum::ENOENT);
-    }
-
-    fn register_umount(&self, entry_name: String) -> Result<UUID, ErrorNum> {
-        let inner = self.0.acquire();
-        let entries = inner.read_dirent_raw()?;
-        for (idx, e) in entries.iter().enumerate() {
-            if e.inode == BAD_INODE {
-                continue;
-            }
-            if e.name() == entry_name {
-                let _tgt_inode: INodeNo = e.inode.into();
-                let base = PFSBase::new(
-                    e.inode.into(), 
-                    inner.base.path.append(e.name().clone())?,
-                    OpenMode::SYS,
-                    inner.base.fs.clone()
-                )?;
-                let f_type = base.f_type()?;
-                match f_type {
-                    FileType::MOUNT => {
-                        // good, write back inode & entry
-                        let inode = inner.base.fs.upgrade().unwrap().get_inode(e.inode.into())?;
-                        let mut inode_inner = inode.acquire();
-                        inode_inner.access_time = get_real_time_epoch();
-                        inode_inner.f_type = PFSType::DIR;
-
-                        let mut new_dentry = e.clone();
-                        // preserve all other info
-                        new_dentry.f_type = PFSType::DIR;
-                        inner.write_dirent_at(new_dentry, idx)?;
-                        return Ok(UUID::from_bytes(inode_inner.mount_info));
-                    },
-                    _ => {
-                        return Err(ErrorNum::EBADTYPE);
-                    }
-                };
-            }
-        }
-        return Err(ErrorNum::ENOENT);
-    }
-}
-
-
-pub struct PFSMountPointInner {
-    pub base: PFSBase
-}
-
-pub struct PFSMountPoint(pub SpinMutex<PFSMountPointInner>);
-
-impl Debug for PFSMountPoint {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        let inner = self.0.acquire();
-        f.write_fmt(format_args!("PFSMountPoint @ {:?}", inner.base.path))
-    }
-}
-
-
-impl File for PFSMountPoint {
-    fn write(&self, _data: alloc::vec::Vec::<u8>) -> Result<usize, crate::utils::ErrorNum> {
-        Err(ErrorNum::EPERM)
-    }
-
-    fn read(&self, _length: usize) -> Result<Vec<u8>, ErrorNum> {
-        Err(ErrorNum::EPERM)
-    }
-
-    fn as_socket<'a>(self: Arc<Self>) -> Result<Arc<dyn crate::fs::SocketFile + 'a>, ErrorNum> where Self: 'a {
-        Err(ErrorNum::EBADTYPE)
-    }
-
-    fn as_link<'a>(self: Arc<Self>) -> Result<Arc<dyn LinkFile + 'a>, ErrorNum> where Self: 'a {
-        Err(ErrorNum::EBADTYPE)
-    }
-
-    fn as_regular<'a>(self: Arc<Self>) -> Result<Arc<dyn RegularFile + 'a>, ErrorNum> where Self: 'a {
-        Err(ErrorNum::EBADTYPE)
-    }
-
-    fn as_block<'a>(self: Arc<Self>) -> Result<Arc<dyn BlockFile + 'a>, ErrorNum> where Self: 'a {
-        Err(ErrorNum::EBADTYPE)
-    }
-
-    fn as_dir<'a>(self: Arc<Self>) -> Result<Arc<dyn DirFile + 'a>, ErrorNum> where Self: 'a {
-        Err(ErrorNum::EBADTYPE)
-    }
-
-    fn as_char<'a>(self: Arc<Self>) -> Result<Arc<dyn crate::fs::CharFile + 'a>, ErrorNum> where Self: 'a {
-        Err(ErrorNum::EBADTYPE)
-    }
-
-    fn as_fifo<'a>(self: Arc<Self>) -> Result<Arc<dyn crate::fs::FIFOFile + 'a>, ErrorNum> where Self: 'a {
-        Err(ErrorNum::EBADTYPE)
-    }
-
-    fn as_mount<'a>(self: Arc<Self>) -> Result<Arc<dyn MountPoint + 'a>, ErrorNum> where Self: 'a {
-        Ok(self)
-    }
-
-    fn as_file<'a>(self: Arc<Self>) -> Arc<dyn File + 'a> where Self: 'a {
-        self
-    }
-
-    fn as_any<'a>(self: Arc<Self>) -> Arc<dyn core::any::Any + Send + Sync + 'a> where Self: 'a {
-        self
-    }
-
-    fn vfs(&self) -> Arc<dyn crate::fs::VirtualFileSystem> {
-        self.0.acquire().base.vfs()
-    }
-
-    fn stat(&self) -> Result<crate::fs::types::FileStat, ErrorNum> {
-        Err(ErrorNum::EBADTYPE)
-    }
-}
-
-impl MountPoint for PFSMountPoint {
-    fn get_uuid(&self) -> UUID {
-        self.0.acquire().base.get_mount_uuid().unwrap()
-    }
 }
 
 pub struct PFSLinkInner {
@@ -765,10 +596,6 @@ impl File for PFSLink {
 
     fn as_any<'a>(self: Arc<Self>) -> Arc<dyn core::any::Any + Send + Sync + 'a> where Self: 'a {
         self
-    }
-
-    fn as_mount     <'a>(self: Arc<Self>) -> Result<Arc<dyn crate::fs::MountPoint   + 'a>, ErrorNum> where Self: 'a {
-        todo!()
     }
 }
 

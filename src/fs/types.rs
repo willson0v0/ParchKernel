@@ -1,5 +1,6 @@
 use core::fmt::Debug;
 use core::any::Any;
+use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
@@ -96,7 +97,6 @@ pub trait File: Send + Sync + Debug {
     fn as_dir       <'a>(self: Arc<Self>) -> Result<Arc<dyn DirFile      + 'a>, ErrorNum> where Self: 'a;
     fn as_char      <'a>(self: Arc<Self>) -> Result<Arc<dyn CharFile     + 'a>, ErrorNum> where Self: 'a;
     fn as_fifo      <'a>(self: Arc<Self>) -> Result<Arc<dyn FIFOFile     + 'a>, ErrorNum> where Self: 'a;
-    fn as_mount     <'a>(self: Arc<Self>) -> Result<Arc<dyn MountPoint   + 'a>, ErrorNum> where Self: 'a;
     fn as_file      <'a>(self: Arc<Self>) -> Arc<dyn File + 'a> where Self: 'a;
     fn as_any       <'a>(self: Arc<Self>) -> Arc<dyn Any + Send + Sync + 'a> where Self: 'a;
     fn vfs              (&self) -> Arc<dyn VirtualFileSystem>;
@@ -122,15 +122,12 @@ pub trait DirFile       : File {
     fn make_file(&self, name: String, perm: Permission, f_type: FileType) -> Result<Arc<dyn File>, ErrorNum>;
     fn remove_file(&self, name: String) -> Result<(), ErrorNum>;
     fn read_dirent(&self) -> Result<Vec<Dirent>, ErrorNum>;
-    fn register_mount(&self, dentry_name: String, uuid: UUID) -> Result<(), ErrorNum>;
-    fn register_umount(&self, dentry_name: String) -> Result<UUID, ErrorNum>;
 }
-pub trait CharFile      : File {}
-pub trait FIFOFile      : File {}
+pub trait CharFile      : File {
+    fn ioctl(&self, op: usize, data: Box<dyn Any>) -> Result<Box<dyn Any>, ErrorNum>;
+}
 
-pub trait MountPoint    : File {
-    fn get_uuid(&self) -> UUID;
-}
+pub trait FIFOFile      : File {}
 
 #[derive(Debug)]
 pub struct DummyLink {
@@ -176,10 +173,6 @@ impl File for DummyLink {
         Err(ErrorNum::EBADTYPE)
     }
 
-    fn as_mount<'a>(self: Arc<Self>) -> Result<Arc<dyn MountPoint + 'a>, ErrorNum> where Self: 'a {
-        Err(ErrorNum::EBADTYPE)
-    }
-
     fn as_file<'a>(self: Arc<Self>) -> Arc<dyn File + 'a> where Self: 'a {
         self
     }
@@ -197,7 +190,7 @@ impl File for DummyLink {
             open_mode: OpenMode::READ,
             file_size: 0,
             path: self.self_path.clone(),
-            inode: 0,
+            inode: self.hash_path(),
             fs: Arc::downgrade(&self.vfs),
         })
     }
@@ -211,4 +204,27 @@ impl LinkFile for DummyLink {
     fn write_link(&self, _path: &Path) -> Result<(), ErrorNum> {
         Err(ErrorNum::EPERM)
     }
+}
+
+impl DummyLink {
+    fn hash_path(&self) -> u32 {
+        let mut res = 0u32;
+
+        for c in self.self_path.components.iter() {
+            res = hash_str(c).wrapping_add(res.wrapping_shl(6)).wrapping_add(res.wrapping_shl(16)).wrapping_sub(res);
+        }
+
+        res
+    }
+}
+
+/// Using the sbdm
+/// res * 65599 + b
+fn hash_str(src: &String) -> u32 {
+    let mut res = 0u32;
+    for b in src.bytes() {
+        res = (b as u32).wrapping_add(res.wrapping_shl(6)).wrapping_add(res.wrapping_shl(16)).wrapping_sub(res);
+    }
+
+    res
 }

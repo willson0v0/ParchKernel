@@ -5,7 +5,7 @@ mod fmt_io;
 pub mod marcos;
 
 mod panic_handler;
-mod uart;
+// mod uart;
 mod lock;
 pub mod time;
 mod error;
@@ -13,6 +13,7 @@ pub mod riscv;
 pub mod elf_rs_wrapper;
 pub mod range;
 mod random;
+mod kprint;
 
 pub use random::{
     rand_usize,
@@ -29,25 +30,20 @@ pub use lock::{
     RWLock
 };
 
-pub use uart::{
-    Uart,
-    UART0
-};
+// pub use uart::{
+//     Uart,
+//     UART0
+// };
 
 pub use fmt_io::{
     print,
     print_no_lock,
     log,
     LogLevel,
-    get_char,
-    get_byte,
-    get_line,
-    k_get_char,
-    k_get_byte,
-    k_get_line,
-    get_term_size
 };
 
 pub use error::{
     ErrorNum
 };
+
+pub use kprint::K_PRINT_HANDLER;
