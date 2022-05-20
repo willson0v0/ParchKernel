@@ -303,13 +303,14 @@ impl UART {
         if let Ok(b) = operator.read() {
             return b;
         }
-        let core = get_processor();
+        drop(operator);
         loop {
+            let core = get_processor();
             if core.current().is_some() {
                 // sleep if is user program
                 core.suspend_switch();
             }
-            if let Ok(b) = operator.read() {
+            if let Ok(b) = self.operator.acquire().read() {
                 return b;
             }
         }

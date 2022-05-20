@@ -229,13 +229,13 @@ impl<T> SpinRWLock<T> {
 
 impl<T> RWLock<T> for SpinRWLock<T> {
     fn acquire_r(&self) -> RWLockReadGuard<'_, T> {
+        push_intr_off();
         // lock the lock itself;
         let mut lock_guard = self.reader_count.acquire();
 
         *lock_guard += 1;
 
         if *lock_guard == 1 {
-            push_intr_off();
             // data alter, wait for write to finish
             while self.write_mutex.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
                 // spin wait
@@ -263,8 +263,8 @@ impl<T> RWLock<T> for SpinRWLock<T> {
             if self.write_mutex.compare_exchange(true, false, Ordering::SeqCst, Ordering::SeqCst).is_err() {
                 panic!("RWLocked must be locked to be unlocked")
             }
-            pop_intr_off();
         }
+        pop_intr_off();
     }
 
     fn release_w(&self) {

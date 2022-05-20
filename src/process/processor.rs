@@ -339,7 +339,10 @@ impl ProcessorInner {
     }
 
     pub fn register_pop_off(&mut self) -> bool {
-        assert!(self.int_off_count >= 1, "unmatched pop_intr_off");
+        if self.int_off_count == 0 {
+            panic!()
+        }
+        assert!(self.int_off_count >= 1);
         self.int_off_count -= 1;
         self.int_off_count == 0 && self.int_enable_b4_off
     }

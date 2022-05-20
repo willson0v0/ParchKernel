@@ -105,7 +105,9 @@ impl MemLayout {
         let mmio_dev = dev_tree.contains_field("reg").unwrap();
         for dev in mmio_dev.iter() {
             let dev_l = dev.acquire_r();
-            if !dev_l.unit_name.starts_with("flash") && !dev_l.unit_name.starts_with("memory") {
+            if !dev_l.unit_name.starts_with("flash") 
+            && !dev_l.unit_name.starts_with("memory")
+            && !dev_l.unit_name.starts_with("cpu") {
                 let ranges = dev_l.reg_value().unwrap();
                 for range in ranges {
                     debug!("registering mmio 0x{:x} ~ 0x{:x}", range.address, range.address+range.size);

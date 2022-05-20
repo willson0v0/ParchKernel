@@ -73,7 +73,7 @@ impl Write for OutputFormatter {
 }
 
 pub fn print(args: fmt::Arguments) {
-    let guard = PRINT_LOCK.acquire();
+    // let guard = PRINT_LOCK.acquire();
 	print_no_lock(args);
 }
 
