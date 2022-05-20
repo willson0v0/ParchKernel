@@ -21,3 +21,4 @@ pub const SYSCALL_SYSSTAT   : usize =  19;
 pub const SYSCALL_MUNMAP    : usize =  20;
 pub const SYSCALL_MKDIR     : usize =  21;
 pub const SYSCALL_TIME      : usize =  22;
+pub const SYSCALL_IOCTL     : usize =  23;

@@ -24,7 +24,7 @@ pub trait Driver: Send + Sync + Debug {
     fn read(&self, length: usize) -> Result<alloc::vec::Vec<u8>, ErrorNum>;
     fn initialize(&self) -> Result<(), ErrorNum>;
     fn terminate(&self);
-    fn ioctl(&self, op: usize, data: Box<dyn Any>) -> Result<Box<dyn Any>, ErrorNum>;
+    fn ioctl(&self, op: usize, data: Vec<u8>) -> Result<Vec<u8>, ErrorNum>;
     fn handle_int(&self) -> Result<(), ErrorNum>;
     fn as_any<'a>(self: Arc<Self>) -> Arc<dyn Any + Send + Sync>;
     fn as_driver<'a>(self: Arc<Self>) -> Arc<dyn Driver>;

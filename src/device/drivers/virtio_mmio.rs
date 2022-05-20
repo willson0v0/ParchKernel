@@ -1,3 +1,5 @@
+use alloc::vec::Vec;
+
 use crate::device::Driver;
 
 #[derive(Debug)]
@@ -24,7 +26,7 @@ impl Driver for VirtIO {
         todo!()
     }
 
-    fn ioctl(&self, op: usize, data: alloc::boxed::Box<dyn core::any::Any>) -> Result<alloc::boxed::Box<dyn core::any::Any>, crate::utils::ErrorNum> {
+    fn ioctl(&self, op: usize, data: Vec<u8>) -> Result<Vec<u8>, crate::utils::ErrorNum> {
         todo!()
     }
 

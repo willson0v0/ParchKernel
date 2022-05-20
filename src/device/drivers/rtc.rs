@@ -70,12 +70,14 @@ impl Driver for RTC {
         ()
     }
 
-    fn ioctl(&self, op: usize, data: alloc::boxed::Box<dyn core::any::Any>) -> Result<alloc::boxed::Box<dyn core::any::Any>, ErrorNum> {
+    fn ioctl(&self, op: usize, data: Vec<u8>) -> Result<Vec<u8>, ErrorNum> {
         let op: IOCtlOp = op.try_into()?;
         // sanity check
-        let _sanity: () = *data.downcast().unwrap();
+        if size_of::<()>() != data.len() {
+            return Err(ErrorNum::EINVAL);
+        }
         if op == IOCtlOp::ReadTime {
-            Ok(Box::new(self.read_time()))
+            Ok(self.read_time().to_le_bytes().to_vec())
         } else {
             Err(ErrorNum::ENOSYS)
         }

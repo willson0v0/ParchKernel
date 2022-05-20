@@ -574,7 +574,7 @@ impl DTBNode {
         let mut res = Vec::new();
 
         let address_cells = if let Some(parent) = self.parent.clone() {
-            parent.upgrade().unwrap().acquire_r().get_value("#address-cells").unwrap_or({
+            parent.upgrade().unwrap().acquire_r().get_value("#address-cells").unwrap_or_else(|_| {
                 warning!("Parent node doesn't have property #address-cells, using default (2)");
                 DTBPropertyValue::UInt32(2)
             }).get_u32().unwrap() as usize
@@ -584,12 +584,12 @@ impl DTBNode {
         };
 
         let size_cells = if let Some(parent) = self.parent.clone() {
-            parent.upgrade().unwrap().acquire_r().get_value("#size-cells").unwrap_or({
+            parent.upgrade().unwrap().acquire_r().get_value("#size-cells").unwrap_or_else(|_| {
                 warning!("Parent node doesn't have property #size-cells, using default (1)");
                 DTBPropertyValue::UInt32(1)
             }).get_u32().unwrap() as usize
         } else {
-            warning!("Parent node doesn't exist, #size-cells using default (2)");
+            warning!("Parent node doesn't exist, #size-cells using default (1)");
             1
         };
 

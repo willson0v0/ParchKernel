@@ -1,4 +1,4 @@
-use alloc::sync::{Arc, Weak};
+use alloc::{sync::{Arc, Weak}, vec::Vec};
 use core::fmt::Debug;
 use crate::{device::{DTBNode, Driver}, fs::{CharFile, File, VirtualFileSystem, types::FileStat}, utils::{RWLock, SpinRWLock}};
 use crate::utils::ErrorNum;
@@ -96,7 +96,7 @@ impl File for Adapter {
 }
 
 impl CharFile for Adapter {
-    fn ioctl(&self, op: usize, data: alloc::boxed::Box<dyn core::any::Any>) -> Result<alloc::boxed::Box<dyn core::any::Any>, ErrorNum> {
+    fn ioctl(&self, op: usize, data: Vec<u8>) -> Result<Vec<u8>, ErrorNum> {
         self.driver.ioctl(op, data)
     }
 }

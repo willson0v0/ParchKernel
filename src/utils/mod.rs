@@ -47,3 +47,10 @@ pub use error::{
 };
 
 pub use kprint::K_PRINT_HANDLER;
+
+pub fn cast_bytes<T: Sized + Copy>(bytes: alloc::vec::Vec<u8>) -> Result<T, ErrorNum> {
+    if bytes.len() != core::mem::size_of::<T>() {
+        return Err(ErrorNum::ENOTALIGNED);
+    }
+    Ok(unsafe {core::ptr::read_unaligned(bytes.as_ptr() as *const _)})
+}

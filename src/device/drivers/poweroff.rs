@@ -1,7 +1,7 @@
-use alloc::{boxed::Box, sync::Arc};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 
 use crate::{device::{device_manager::Driver, device_tree::DTBPropertyValue}, mem::PhysAddr, utils::{RWLock, UUID}};
-use core::fmt::Debug;
+use core::{fmt::Debug, mem::size_of};
 use crate::utils::ErrorNum;
 
 /// This is a generic poweroff dirver using syscon to map the poweroff register.
@@ -68,15 +68,18 @@ impl Driver for PowerOff {
         
     }
 
-    fn ioctl(&self, op: usize, data: alloc::boxed::Box<dyn core::any::Any>) -> Result<alloc::boxed::Box<dyn core::any::Any>, crate::utils::ErrorNum> {
+    fn ioctl(&self, op: usize, data: Vec<u8>) -> Result<Vec<u8>, ErrorNum> {
         let op: IOCtlOp = op.try_into()?;
-        let _sanity: () = *data.downcast().unwrap();
+        // sanity check
+        if size_of::<()>() != data.len() {
+            return Err(ErrorNum::EINVAL);
+        }
         match op {
             IOCtlOp::Shutdown => {
                 // TODO: write modified context information into nvm, then shutdown. Maybe asm code.
                 self.shutdown();
                 // The modified context will take us here, and it WILL return.
-                return Ok(Box::new(()))
+                return Ok(Vec::new())
             },
         }
     }

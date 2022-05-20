@@ -140,6 +140,7 @@ impl PhysAddr {
     }
 
     pub unsafe fn write_data(&self, data: Vec<u8>) {
+        if data.len() == 0 {return;}
         copy_nonoverlapping(data.as_ptr(), self.0 as * mut u8, data.len());
     }
 
@@ -206,6 +207,7 @@ impl VirtAddr {
 
     /// This WILL copy the data (to_vec did it)
     pub unsafe fn read_data(&self, length: usize) -> Vec<u8> {
+        if length == 0 {return Vec::new();}
         from_raw_parts_mut(self.0 as *mut u8, length).to_vec()
     }
 

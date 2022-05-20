@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 use crate::device::DeviceTree;
 use crate::mem::PhysAddr;
 use crate::process::get_hart_id;
-use crate::utils::{ErrorNum, Mutex, RWLock, SpinMutex, UUID};
+use crate::utils::{ErrorNum, Mutex, RWLock, SpinMutex, UUID, cast_bytes};
 use crate::device::device_manager::{Driver, IntController};
 use core::fmt::Debug;
 use core::mem::size_of;
@@ -19,6 +19,7 @@ enum_with_tryfrom_usize!{
     }
 }
 
+#[derive(Debug, Copy, Clone)]
 pub enum IOCtlParam {
     /// irq, priority
     SetIRQPriority(u32, u32),
@@ -155,27 +156,30 @@ impl Driver for PLIC {
         // do nothing
     }
 
-    fn ioctl(&self, op: usize, data: alloc::boxed::Box<dyn core::any::Any>) -> Result<alloc::boxed::Box<dyn core::any::Any>, crate::utils::ErrorNum> {
+    fn ioctl(&self, op: usize, data: Vec<u8>) -> Result<Vec<u8>, ErrorNum> {
         let op: IOCtlOp = op.try_into()?;
-        let param: Box<IOCtlParam> = data.downcast().map_err(|_| ErrorNum::EINVAL)?;
-        match (op, *param) {
+        let param: IOCtlParam = cast_bytes(data)?;
+        let res = match (op, param) {
             (IOCtlOp::SetIRQPriority, IOCtlParam::SetIRQPriority(irq, priority)) => {
                 self.operator.acquire().set_irq_priority(irq, priority);
-                Ok(Box::new(IOCtlRes::SetIRQPriority))
+                IOCtlRes::SetIRQPriority
             },
             (IOCtlOp::SetHartIRQAvailability, IOCtlParam::SetHartIRQAvailability(hart, irq, availability)) => {
                 self.operator.acquire().hart_irq_availability(hart, irq, availability);
-                Ok(Box::new(IOCtlRes::SetHartIRQAvailability))
+                IOCtlRes::SetHartIRQAvailability
             },
             (IOCtlOp::SetHartIntThreshold, IOCtlParam::SetHartIntThreshold(hart, threshold)) => {
                 self.operator.acquire().set_hart_priority_threshold(hart, threshold);
-                Ok(Box::new(IOCtlRes::SetHartIntThreshold))
+                IOCtlRes::SetHartIntThreshold
             },
             (IOCtlOp::ReadHartIntThreshold, IOCtlParam::ReadHartIntThreshold(hart)) => {
-                Ok(Box::new(IOCtlRes::ReadHartIntThreshold(self.operator.acquire().read_hart_priority_threshold(hart))))
+                IOCtlRes::ReadHartIntThreshold(self.operator.acquire().read_hart_priority_threshold(hart))
             },
-            _ => Err(ErrorNum::EINVAL),
-        }
+            _ => return Err(ErrorNum::EINVAL),
+        };
+
+        let slice = unsafe{core::slice::from_raw_parts(&res as *const IOCtlRes as *const u8, size_of::<IOCtlRes>())};
+        Ok(slice.to_vec())
     }
 
     fn handle_int(&self) -> Result<(), crate::utils::ErrorNum> {

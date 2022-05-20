@@ -2,9 +2,9 @@ use core::{arch::asm};
 
 use alloc::{vec::Vec, sync::Arc, string::String};
 use riscv::register::{satp};
-use crate::{utils::{ErrorNum}, config::{PHYS_END_ADDR, MMIO_RANGES, PAGE_SIZE, PROC_U_STACK_ADDR}, mem::{TrampolineSegment, UTrampolineSegment, TrapContextSegment, IdenticalMappingSegment, segment::{SegmentFlags, ProgramSegment}, VirtAddr, types::VPNRange, VMASegment}, fs::RegularFile, process::{get_processor, get_hart_id}};
+use crate::{config::{PHYS_END_ADDR, MMIO_RANGES, PAGE_SIZE, PROC_U_STACK_ADDR}, fs::RegularFile, mem::{TrampolineSegment, UTrampolineSegment, TrapContextSegment, IdenticalMappingSegment, segment::{SegmentFlags, ProgramSegment}, VirtAddr, types::VPNRange, VMASegment}, process::{get_processor, get_hart_id}, utils::{ErrorNum, RWLock}};
 use super::{PageTable, VirtPageNum, ProcKStackSegment, segment::ProcUStackSegment, ArcSegment, MMAPType};
-
+use crate::device::DEVICE_MANAGER;
 use crate::utils::elf_rs_wrapper::read_elf;
 use elf_rs::*;
 
@@ -101,17 +101,37 @@ impl MemLayout {
         // );
         // MMIOS (CLINT etc.)
         verbose!("Registering MMIO...");
-        for (start, end) in MMIO_RANGES {
-            layout.register_segment(
-                IdenticalMappingSegment::new(
-                    VPNRange::new(
-                        VirtAddr::from(*start).into(), 
-                        VirtAddr::from(*end).into()
-                    ),
-                    SegmentFlags::R | SegmentFlags::W
-                )
-            );
+        let dev_tree = DEVICE_MANAGER.acquire_r().get_dev_tree();
+        let mmio_dev = dev_tree.contains_field("reg").unwrap();
+        for dev in mmio_dev.iter() {
+            let dev_l = dev.acquire_r();
+            if !dev_l.unit_name.starts_with("flash") && !dev_l.unit_name.starts_with("memory") {
+                let ranges = dev_l.reg_value().unwrap();
+                for range in ranges {
+                    debug!("registering mmio 0x{:x} ~ 0x{:x}", range.address, range.address+range.size);
+                    layout.register_segment(
+                        IdenticalMappingSegment::new(
+                            VPNRange::new(
+                                VirtAddr::from(range.address).into(), 
+                                VirtAddr::from(range.address+range.size).to_vpn_ceil()
+                            ),
+                            SegmentFlags::R | SegmentFlags::W
+                        )
+                    );
+                }
+            }
         }
+        // for (start, end) in MMIO_RANGES {
+        //     layout.register_segment(
+        //         IdenticalMappingSegment::new(
+        //             VPNRange::new(
+        //                 VirtAddr::from(*start).into(), 
+        //                 VirtAddr::from(*end).into()
+        //             ),
+        //             SegmentFlags::R | SegmentFlags::W
+        //         )
+        //     );
+        // }
 
         // XXX: do_map here, or later?
         verbose!("Mapping all segment into pagetable...");

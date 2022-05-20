@@ -124,7 +124,7 @@ pub trait DirFile       : File {
     fn read_dirent(&self) -> Result<Vec<Dirent>, ErrorNum>;
 }
 pub trait CharFile      : File {
-    fn ioctl(&self, op: usize, data: Box<dyn Any>) -> Result<Box<dyn Any>, ErrorNum>;
+    fn ioctl(&self, op: usize, data: Vec<u8>) -> Result<Vec<u8>, ErrorNum>;
 }
 
 pub trait FIFOFile      : File {}

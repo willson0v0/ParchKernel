@@ -137,10 +137,9 @@ extern "C" fn genesis_s() -> ! {
     if get_hart_id() == 0 {
         // common init code (mm/fs)
         mem::init();
-        mem::hart_init();
-        
         device::init();
-        
+        mem::hart_init();
+
         println!("\r\n\n\n\nParch OS\n");
         println!("Ver\t: {}", version::VERSION);
 

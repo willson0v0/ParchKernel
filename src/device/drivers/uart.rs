@@ -1,9 +1,10 @@
 //! UART driver for /dev/pts
 //! kernel print use utils/uart.rs
 
+use core::mem::size_of;
 use alloc::{boxed::Box, collections::VecDeque, string::ToString, sync::Arc, vec::Vec};
 
-use crate::{device::{device_manager::Driver, device_tree::DTBPropertyValue}, mem::PhysAddr, process::get_processor, utils::{Mutex, MutexGuard, RWLock, SpinMutex, UUID}};
+use crate::{device::{device_manager::Driver, device_tree::DTBPropertyValue}, mem::PhysAddr, process::get_processor, utils::{Mutex, MutexGuard, RWLock, SpinMutex, UUID, cast_bytes}};
 use core::{any::Any, fmt::Debug};
 use crate::utils::ErrorNum;
 use bitflags::*;
@@ -25,10 +26,9 @@ enum_with_tryfrom_usize!{
     #[repr(usize)]
     pub enum IOCtlOp {
         WriteByte = 1,
-        WriteArr = 2,
-        ReadByte = 3,
-        Config = 4,
-        Sync = 5,
+        ReadByte = 2,
+        Config = 3,
+        Sync = 4,
     }
 }
 
@@ -83,9 +83,9 @@ pub enum RCVRLength {
     Fourteen
 }
 
+#[derive(Copy, Clone, Debug)]
 pub enum IOCtlParam {
     Write(u8),
-    WriteArr(Vec<u8>),
     Read,
     Config(Config),
     Sync,
@@ -93,7 +93,6 @@ pub enum IOCtlParam {
 
 pub enum IOCtlRes {
     Write,
-    WriteArr,
     Read(u8),
     Config,
     Sync,
@@ -359,38 +358,6 @@ impl Driver for UART {
         // Do Nothing.
     }
 
-    fn ioctl(&self, op: usize, data: alloc::boxed::Box<dyn core::any::Any>) -> Result<alloc::boxed::Box<dyn core::any::Any + '_>, crate::utils::ErrorNum> {
-        let op = IOCtlOp::try_from(op)?;
-        let param: Box<IOCtlParam> = data.downcast().unwrap();
-        match (op, *param) {
-            (IOCtlOp::WriteByte, IOCtlParam::Write(b)) => {
-                self.write_byte(b);
-                return Ok(Box::new(IOCtlRes::Write))
-            },
-            (IOCtlOp::WriteArr, IOCtlParam::WriteArr(arr)) => {
-                self.write_arr(arr);
-                return Ok(Box::new(IOCtlRes::Write))
-            },
-            (IOCtlOp::ReadByte, IOCtlParam::Read) => {
-                return Ok(Box::new(IOCtlRes::Read(self.read_byte())));
-            },
-            (IOCtlOp::Config, IOCtlParam::Config(param)) => {
-                self.operator.acquire().config(self.clock_freq, param)?;
-                return Ok(Box::new(IOCtlRes::Config));
-            },
-            (IOCtlOp::Sync, IOCtlParam::Sync) => {
-                let operator = self.operator.acquire();
-                operator.deplete_r_buffer(&mut self.buffer_r.acquire());
-                operator.dump_w_buffer(&mut self.buffer_w.acquire());
-
-                return Ok(Box::new(IOCtlRes::Sync));
-            },
-            _ => {
-                return Err(ErrorNum::EINVAL)
-            }
-        }
-    }
-
     fn handle_int(&self) -> Result<(), ErrorNum> {
         let operator = self.operator.acquire();
         match operator.read_int_cause()? {
@@ -427,5 +394,36 @@ impl Driver for UART {
             res.push(self.read_byte());
         }
         Ok(res)
+    }
+
+    fn ioctl(&self, op: usize, data: Vec<u8>) -> Result<Vec<u8>, ErrorNum> {
+        let op = IOCtlOp::try_from(op)?;
+        let param: IOCtlParam = cast_bytes(data)?;
+        let res = match (op, param) {
+            (IOCtlOp::WriteByte, IOCtlParam::Write(b)) => {
+                self.write_byte(b);
+                IOCtlRes::Write
+            },
+            (IOCtlOp::ReadByte, IOCtlParam::Read) => {
+                IOCtlRes::Read(self.read_byte())
+            },
+            (IOCtlOp::Config, IOCtlParam::Config(param)) => {
+                self.operator.acquire().config(self.clock_freq, param)?;
+                IOCtlRes::Config
+            },
+            (IOCtlOp::Sync, IOCtlParam::Sync) => {
+                let operator = self.operator.acquire();
+                operator.deplete_r_buffer(&mut self.buffer_r.acquire());
+                operator.dump_w_buffer(&mut self.buffer_w.acquire());
+
+                IOCtlRes::Sync
+            },
+            _ => {
+                return Err(ErrorNum::EINVAL);
+            }
+        };
+
+        let slice = unsafe{core::slice::from_raw_parts(&res as *const IOCtlRes as *const u8, size_of::<IOCtlRes>())};
+        Ok(slice.to_vec())
     }
 }

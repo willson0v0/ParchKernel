@@ -29,6 +29,7 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> Result<usize, ErrorNum> {
         SYSCALL_GETDENTS    => CALL_SYSCALL!(do_trace, sys_getdents     , FileDescriptor::from(args[0]), VirtAddr::from(args[1]), args[2]),
         SYSCALL_PIPE        => CALL_SYSCALL!(do_trace, sys_pipe         , VirtAddr::from(args[0])),
         SYSCALL_SYSSTAT     => CALL_SYSCALL!(do_trace, sys_sysstat      , VirtAddr::from(args[0])),
+        SYSCALL_IOCTL       => CALL_SYSCALL!(do_trace, sys_ioctl        , FileDescriptor::from(args[0]), args[1], VirtAddr::from(args[2]), args[3], VirtAddr::from(args[4]), args[5]),
         _ => CALL_SYSCALL!(true, sys_unknown, syscall_id)
     }
 }
@@ -423,6 +424,18 @@ pub fn sys_sysstat(stat_ptr: VirtAddr) -> Result<usize, ErrorNum> {
 pub fn sys_munmap() {
 
     todo!()
+}
+
+pub fn sys_ioctl(fd: FileDescriptor, op: usize, buf: VirtAddr, length: usize, target: VirtAddr, tgt_size: usize) -> Result<usize, ErrorNum> {
+    let file = get_processor().current().unwrap().get_inner().get_file(fd)?.clone().as_char()?;
+    let data = unsafe{ buf.read_data(length) };
+    let res = file.ioctl(op, data)?;
+    let res_len = res.len();
+    if res_len > tgt_size {
+        return Err(ErrorNum::EOVERFLOW);
+    }
+    unsafe{target.write_data(res)};
+    Ok(res_len)
 }
 
 pub fn sys_unknown(syscall_id:usize) -> Result<usize, ErrorNum> {

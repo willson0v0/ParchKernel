@@ -18,4 +18,5 @@ pub fn init() {
         debug!("driver {:?}, uuid {}", driver, id);
     }
     milestone!("Device manager initialized.");
+    DEVICE_MANAGER.acquire_r().get_dev_tree().print(crate::utils::LogLevel::Debug);
 }
