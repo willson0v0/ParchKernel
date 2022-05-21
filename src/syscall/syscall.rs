@@ -19,6 +19,7 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> Result<usize, ErrorNum> {
         SYSCALL_EXEC        => CALL_SYSCALL!(do_trace, sys_exec         , VirtAddr::from(args[0]), VirtAddr::from(args[1])),
         SYSCALL_EXIT        => CALL_SYSCALL!(do_trace, sys_exit         , args[0] as isize),
         SYSCALL_MMAP        => CALL_SYSCALL!(do_trace, sys_mmap         , VirtAddr::from(args[0]), args[1], MMAPProt::from_bits(args[2]).ok_or(ErrorNum::EINVAL)?, MMAPFlag::from_bits(args[3]).ok_or(ErrorNum::EINVAL)?, FileDescriptor::from(args[4]), args[5]),
+        SYSCALL_MUNMAP      => CALL_SYSCALL!(do_trace, sys_munmap       , VirtAddr::from(args[0]), args[1]),
         SYSCALL_WAITPID     => CALL_SYSCALL!(do_trace, sys_waitpid      , args[0] as isize, VirtAddr::from(args[1])),
         SYSCALL_SIGNAL      => CALL_SYSCALL!(do_trace, sys_signal       , ProcessID(args[0]), args[1]),
         SYSCALL_SIGACTION   => CALL_SYSCALL!(do_trace, sys_sigaction    , args[0], VirtAddr::from(args[1])),
@@ -211,10 +212,10 @@ pub fn sys_mmap(tgt_addr: VirtAddr, length: usize, prot: MMAPProt, flag: MMAPFla
         if fd != FileDescriptor::from(usize::MAX) {
             return Err(ErrorNum::EINVAL);
         }
-        
+        let seg_flag: SegmentFlags = prot.into();
         proc_inner.mem_layout.register_segment(ManagedSegment::new(VPNRange::new(
             tgt_pos.into(), (tgt_pos+length).to_vpn_ceil().into()), 
-            prot.into(), 
+            seg_flag | SegmentFlags::U, 
             length
         ));
         proc_inner.mem_layout.do_map();
@@ -236,7 +237,7 @@ pub fn sys_mmap(tgt_addr: VirtAddr, length: usize, prot: MMAPProt, flag: MMAPFla
         proc_inner.mem_layout.register_segment(VMASegment::new_at(
             tgt_pos.into(),
             mmap_file,
-            seg_flag,
+            seg_flag | SegmentFlags::U,
             offset,
             length,
             if flag.contains(MMAPFlag::SHARED) {
@@ -422,9 +423,11 @@ pub fn sys_sysstat(stat_ptr: VirtAddr) -> Result<usize, ErrorNum> {
     Ok(0)
 }
 
-pub fn sys_munmap() {
-
-    todo!()
+pub fn sys_munmap(head_ptr: VirtAddr, length: usize) -> Result<usize, ErrorNum> {
+    let pcb_guard = get_processor().current().unwrap();
+    let mut pcb = pcb_guard.get_inner();
+    pcb.mem_layout.unmap_vma(head_ptr, length)?;
+    Ok(0)
 }
 
 pub fn sys_ioctl(fd: FileDescriptor, op: usize, buf: VirtAddr, length: usize, target: VirtAddr, tgt_size: usize) -> Result<usize, ErrorNum> {

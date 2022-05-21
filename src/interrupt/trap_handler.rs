@@ -204,9 +204,8 @@ pub fn user_trap() -> ! {
             Trap::Exception(Exception::StorePageFault)          => {
                 let proc = get_processor().current().unwrap();
                 let mut proc_inner = proc.get_inner();
-                
-                if proc_inner.mem_layout.do_lazy(VirtAddr::from(stval).into()).is_err() {
-                    fatal!("User Pagefault.");
+                if let Err(e) = proc_inner.mem_layout.do_lazy(VirtAddr::from(stval).into()) {
+                    fatal!("User Pagefault, do lazy failed with {:?}.", e);
                     fatal!("STVAL: {:x}", stval);
                     fatal!("SEPC : {:x}", sepc);
                     fatal!("User Program dead.");

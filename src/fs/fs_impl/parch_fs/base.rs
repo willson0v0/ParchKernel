@@ -38,6 +38,7 @@ impl PFSBase {
             for i in 0..min(DIRECT_BLK_COUNT, offset / BLK_SIZE + 1) {
                 if inode.direct_blk_no[i] == BAD_BLOCK {
                     inode.direct_blk_no[i] = fs_inner.alloc_blk();
+                    verbose!("alloc blk {:?} (pa {:?})", inode.direct_blk_no[i], ParchFS::blockno_2_ppn(inode.direct_blk_no[i]))
                 }
             }
         }
@@ -52,6 +53,8 @@ impl PFSBase {
         if create {
             if inode.indirect_blk == BAD_BLOCK {
                 inode.indirect_blk = fs_inner.alloc_blk();
+                inode.indirect_blk.clear_blk();
+                verbose!("alloc indirect blk {:?} (pa {:?})", inode.indirect_blk, ParchFS::blockno_2_ppn(inode.indirect_blk))
             }
 
             let indirect_blk_pa = ParchFS::blockno_2_pa(inode.indirect_blk);
@@ -62,6 +65,7 @@ impl PFSBase {
             for i in 0..min(BLOCKNO_PER_BLK, offset / BLK_SIZE + 1) {
                 if blocks[i] == BAD_BLOCK {
                     blocks[i] = fs_inner.alloc_blk();
+                    verbose!("alloc blk {:?} (pa {:?})", blocks[i], ParchFS::blockno_2_ppn(blocks[i]))
                 }
             }
         }
@@ -81,6 +85,8 @@ impl PFSBase {
         if create {
             if inode.indirect_blk2 == BAD_BLOCK {
                 inode.indirect_blk2 = fs_inner.alloc_blk();
+                inode.indirect_blk2.clear_blk();
+                verbose!("alloc l1 indirect blk {:?} (pa {:?})", inode.indirect_blk2, ParchFS::blockno_2_ppn(inode.indirect_blk2))
             }
 
             let lv1_indirect_blk_pa = ParchFS::blockno_2_pa(inode.indirect_blk2);
@@ -91,6 +97,8 @@ impl PFSBase {
             for i in 0..min(BLOCKNO_PER_BLK, offset / (BLOCKNO_PER_BLK * BLK_SIZE) + 1) {
                 if lv1_indirect_blks[i] == BAD_BLOCK {
                     lv1_indirect_blks[i] = fs_inner.alloc_blk();
+                    lv1_indirect_blks[i].clear_blk();
+                    verbose!("alloc l2 indirect blk {:?} (pa {:?})", lv1_indirect_blks[i], ParchFS::blockno_2_ppn(lv1_indirect_blks[i]))
                 }
 
                 let lv2_indirect_blk_pa = ParchFS::blockno_2_pa(lv1_indirect_blks[i]);
@@ -101,6 +109,7 @@ impl PFSBase {
                 for j in 0..BLOCKNO_PER_BLK {
                     if lv2_indirect_blks[i] == BAD_BLOCK {
                         lv2_indirect_blks[i] = fs_inner.alloc_blk();
+                        verbose!("alloc blk {:?} (pa {:?})", lv2_indirect_blks[i], ParchFS::blockno_2_ppn(lv2_indirect_blks[i]))
                     }
 
                     let lv2_cap = i * BLOCKNO_PER_BLK * BLK_SIZE + j * BLK_SIZE;

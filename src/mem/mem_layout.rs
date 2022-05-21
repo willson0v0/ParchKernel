@@ -402,4 +402,9 @@ impl MemLayout {
         error!("Cannot find lazy entry for {:?}", vpn);
         Err(ErrorNum::ENOSEG)
     }
+
+    pub fn unmap_vma(&mut self, head: VirtAddr, length: usize) -> Result<(), ErrorNum> {
+        let seg = self.get_segment(head.into())?.as_vma()?;
+        seg.unmap_part(head, length, &mut self.pagetable)
+    }
 }

@@ -35,7 +35,7 @@ impl INodeNo {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct BlockNo(pub u32);
 
 impl From<u32> for BlockNo {
@@ -51,8 +51,12 @@ impl From<usize> for BlockNo {
 }
 
 impl BlockNo {
-    pub fn to_pa(&self, _fs: Weak<ParchFS>) -> PhysAddr {
+    pub fn to_pa(&self) -> PhysAddr {
         ParchFS::blockno_2_pa(*self)
+    }
+
+    pub fn clear_blk(&self) {
+        unsafe {ParchFS::blockno_2_ppn(*self).clear_content()}
     }
 }
 

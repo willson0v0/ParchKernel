@@ -605,14 +605,14 @@ impl Segment for VMASegment {
                     pagetable.remap(vpn, tgt_page.ppn, inner.flag.into())
                 },
                 PageGuardSlot::LazyVMAPrivate((file, offset)) => {
-                    verbose!("lazy vma triggered.");
+                    verbose!("lazy vma private triggered.");
                     let pg = file.copy_page(offset)?;
                     pagetable.map(vpn, pg.ppn, inner.flag.into());
                     inner.frames.insert(vpn, PageGuardSlot::Populated(pg));
                 },
                 PageGuardSlot::LazyVMAShared((file, offset)) => {
-                    verbose!("lazy vma triggered.");
                     let pg = file.get_page(offset)?;
+                    verbose!("lazy vma shared triggered, fs report actual content at {:?}", pg);
                     pagetable.map(vpn, pg.ppn, inner.flag.into());
                     inner.frames.insert(vpn, PageGuardSlot::Populated(pg));
                 },
