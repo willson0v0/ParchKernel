@@ -7,7 +7,7 @@ use bitflags::*;
 use core::fmt::Debug;
 
 
-use alloc::{sync::{Weak, Arc}, string::String, vec::Vec};
+use alloc::{string::{String, ToString}, sync::{Weak, Arc}, vec::Vec};
 
 use static_assertions::*;
 
@@ -276,6 +276,16 @@ impl RegularFile for PFSRegular {
     fn get_page(&self, offset: usize) -> Result<crate::mem::PageGuard, crate::utils::ErrorNum> {
         self.0.acquire().base.get_page(offset)
     }
+
+    fn seek(&self, mut offset: usize) -> Result<usize, ErrorNum> {
+        let mut inner = self.0.acquire();
+        let len = inner.base.stat().unwrap().file_size;
+        if offset > len {
+            offset = len;
+        }
+        inner.cursor.0 = offset;
+        Ok(inner.cursor.0)
+    }
 }
 
 impl BlockFile for PFSRegular {}
@@ -342,6 +352,43 @@ impl PFSDirInner {
         }
         let pos = empty_dirent.unwrap() as usize;
         self.write_dirent_at(dirent, pos)
+    }
+
+    fn remove_self(&self) {
+        let entries = self.read_dirent_raw().unwrap();
+        let mut children_dir: Vec<PFSDir> = Vec::new();
+        for (idx, e) in entries.iter().enumerate() {
+            if e.inode != BAD_INODE {
+                let fs = self.base.fs.upgrade().unwrap();
+                let mut fs_inner = fs.inner.acquire();
+                let inode_guard = fs_inner.get_inode(e.inode.into()).unwrap();
+                let mut inode = inode_guard.acquire();
+                inode.hard_link_count -= 1;
+                if inode.hard_link_count == 0 {
+                    if inode.f_type == PFSType::DIR {
+                        children_dir.push(PFSDir(SpinMutex::new("PFS", PFSDirInner{
+                            base: PFSBase{
+                                inode_no: e.inode,
+                                open_mode: OpenMode::SYS,
+                                fs: self.base.fs.clone(),
+                                path: self.base.path.append(e.name()).unwrap(),
+                            }})
+                        ));
+                        // keep the inode and free after it's children are freed.
+                    } else {
+                        fs_inner.free_inode(e.inode.into());
+                    }
+                }
+                drop(inode);
+                drop(inode_guard);
+                drop(fs_inner);
+                self.write_dirent_at(PFSDEntry::empty(), idx).unwrap();
+            }
+        }
+        for c in children_dir {
+            c.0.acquire().remove_self();
+        }
+        self.base.fs.upgrade().unwrap().inner.acquire().free_inode(self.base.inode_no);
     }
 }
 
@@ -458,6 +505,7 @@ impl DirFile for PFSDir {
         }
         
         let inner = self.0.acquire();
+        let parent_inode = inner.base.inode_no;
         let fs = inner.base.fs.upgrade().unwrap();
         let mut fs_inner = fs.inner.acquire();
         let inode_no = fs_inner.alloc_inode();
@@ -469,7 +517,7 @@ impl DirFile for PFSDir {
         inode.uid = 0;
         inode.gid = 0;
         inode.flags = 0;
-        inode.hard_link_count = 1;
+        inode.hard_link_count = if f_type == FileType::DIR {2} else {1};
         inode.direct_blk_no = [BAD_BLOCK; DIRECT_BLK_COUNT];
         inode.indirect_blk = BAD_BLOCK;
         inode.indirect_blk2 = BAD_BLOCK;
@@ -497,7 +545,33 @@ impl DirFile for PFSDir {
         
         drop(inner);
 
-        self.open_entry(&name.into(), OpenMode::SYS)
+        let res = self.open_entry(&name.into(), OpenMode::SYS)?;
+        if let Ok(dir) = res.clone().as_dir() {
+            let dir: Arc<PFSDir> = Arc::downcast(dir.as_any()).unwrap();
+            let mut dot_name = [0u8; DENTRY_NAME_LEN];
+            dot_name[0] = b'.';
+            dir.0.acquire().add_dirent( PFSDEntry {
+                    inode: inode_no,
+                    permission: perm.into(),
+                    f_type: PFSType::DIR,
+                    name_len: 1,
+                    f_name: dot_name,
+                }
+            ).unwrap();
+            
+            let mut dot2_name = [0u8; DENTRY_NAME_LEN];
+            dot2_name[0] = b'.';
+            dot2_name[1] = b'.';
+            dir.0.acquire().add_dirent( PFSDEntry {
+                    inode: parent_inode,
+                    permission: perm.into(),
+                    f_type: PFSType::DIR,
+                    name_len: 2,
+                    f_name: dot2_name,
+                }
+            ).unwrap();
+        }
+        Ok(res)
     }
 
     fn remove_file(&self, name: String) -> Result<(), ErrorNum> {
@@ -509,9 +583,25 @@ impl DirFile for PFSDir {
                 let mut fs_inner = fs.inner.acquire();
                 let inode_guard = fs_inner.get_inode(e.inode.into())?;
                 let mut inode = inode_guard.acquire();
-                inode.hard_link_count -= 1;
-                if inode.hard_link_count == 0 {
-                    fs_inner.free_inode(e.inode.into());
+                if inode.f_type == PFSType::DIR {
+                    let child_inner = PFSDirInner {
+                        base: PFSBase {
+                            inode_no: e.inode.into(),
+                            open_mode: OpenMode::SYS,
+                            fs: inner.base.fs.clone(),
+                            path: inner.base.path.append(e.f_name.clone()).unwrap(),
+                        }
+                    };
+                    drop(fs_inner);
+                    drop(inode);
+                    child_inner.remove_self();
+                } else {
+                    inode.hard_link_count -= 1;
+                    if inode.hard_link_count == 0 {
+                        fs_inner.free_inode(e.inode.into());
+                    }
+                    drop(fs_inner);
+                    drop(inode);
                 }
                 inner.write_dirent_at(PFSDEntry::empty(), idx)?;
                 return Ok(());

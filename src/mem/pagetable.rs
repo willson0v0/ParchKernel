@@ -188,6 +188,7 @@ pub struct PageTable {
 impl PageTable {
     pub fn new_empty() -> Self {
         let root = alloc_vm_page();
+        unsafe{root.ppn.clear_content();}
         Self {
             root_ppn: root.ppn,
             pages: vec![root]

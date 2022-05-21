@@ -21,8 +21,10 @@ pub use types::{
     CharFile    ,
     FIFOFile    ,
     DummyLink   ,
-    Cursor,
-    Dirent
+    Cursor      ,
+    Dirent      ,
+    FileType    ,
+    Permission
 };
 
 pub use vfs::{
@@ -41,8 +43,6 @@ use lazy_static::*;
 
 use crate::utils::{RWLock, ErrorNum};
 
-use self::types::Permission;
-
 lazy_static!{
     pub static ref MOUNT_MANAGER: MountManager = {
         let root_fs = fs_impl::PARCH_FS.clone();
@@ -58,6 +58,18 @@ pub fn open(path: &Path, mode: OpenMode) -> Result<alloc::sync::Arc<dyn File>, c
 
 pub fn open_at(file: Arc<dyn File>, rel_path: &Path, mode: OpenMode) -> Result<Arc<dyn File>, ErrorNum> {
     MOUNT_MANAGER.inner.acquire_r().open_at(file, rel_path, mode)
+}
+
+pub fn delete(path: &Path) -> Result<(), ErrorNum> {
+    MOUNT_MANAGER.inner.acquire_r().remove(path)
+}
+
+pub fn make_file(path: &Path, permission: Permission, f_type: FileType) -> Result<(), ErrorNum> {
+    MOUNT_MANAGER.inner.acquire_r().make_file(path, permission, f_type)
+}
+
+pub fn make_file_at(path: &Path, root: Arc<dyn File>, permission: Permission, f_type: FileType) -> Result<(), ErrorNum> {
+    MOUNT_MANAGER.inner.acquire_r().make_file_at(path, root, permission, f_type)
 }
 
 pub fn init() {

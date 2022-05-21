@@ -39,12 +39,12 @@ impl BitMapIndex {
         let mut sub_entries = Vec::new();
         let mut sub_mask: u64 = 0;
         if level != 0 {
-            let mut len = length;
-            while len > 0 {
-                let current_len = min(Self::capacity(level - 1), len);
-                sub_mask += 1 << (sub_entries.len());
+            let mut covered_length = 0;
+            while covered_length < length {
+                let current_len = Self::capacity(level - 1);
+                sub_mask |= 1 << (sub_entries.len());
                 sub_entries.push(RefCell::new(Self::new(current_len)));
-                len -= current_len;
+                covered_length += current_len;
             }
         } else {
             sub_mask = 0xFFFF_FFFF_FFFF_FFFF;
@@ -91,7 +91,7 @@ impl BitMapIndex {
     }
 
     fn clear_bit(&mut self, pos: usize) {
-        self.bits = self.bits & !(1<<pos);
+        self.bits = self.bits & (!(1<<pos));
     }
 
     fn get_bit(&self, pos: usize) -> bool {
@@ -187,7 +187,7 @@ impl BitMap {
         let mut bi = BitMapIndex::new(length/64);
 
         for i in 0..(length/64) {
-            bi.set_val(i, unsafe{(start_addr+i).read_volatile::<u64>() == 0xFFFF_FFFF_FFFF_FFFF});
+            bi.set_val(i, unsafe{(start_addr + i * core::mem::size_of::<u64>()).read_volatile::<u64>() == 0xFFFF_FFFF_FFFF_FFFF});
         }
         
         Self {
@@ -213,7 +213,7 @@ impl BitMap {
         let arr_index = pos / 64;
         let arr_offset = pos % 64;
         let original_bits = self.raw_get_bits(arr_index);
-        unsafe {(self.start_addr + arr_index).write_volatile(&(original_bits | (1 << arr_offset)))}
+        unsafe {(self.start_addr + arr_index * core::mem::size_of::<u64>()).write_volatile(&(original_bits | (1 << arr_offset)))}
     }
 
     fn raw_clear(&self, pos: usize) {
@@ -223,7 +223,7 @@ impl BitMap {
         let arr_index = pos / 64;
         let arr_offset = pos % 64;
         let original_bits = self.raw_get_bits(arr_index);
-        unsafe {(self.start_addr + arr_index).write_volatile(&(original_bits & !(1 << arr_offset)))}
+        unsafe {(self.start_addr + arr_index * core::mem::size_of::<u64>()).write_volatile(&(original_bits & !(1 << arr_offset)))}
     }
 
     /// arr_index for u64
@@ -231,7 +231,7 @@ impl BitMap {
         if cfg!(debug_assertions) {
             assert!(arr_index < self.length / 64, "Bitmap oor");
         }
-        unsafe {(self.start_addr + arr_index).read_volatile()}
+        unsafe {(self.start_addr + arr_index * core::mem::size_of::<u64>()).read_volatile()}
     }
 
     pub fn get(&self, pos: usize) -> bool {

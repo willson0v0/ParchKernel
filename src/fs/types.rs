@@ -113,6 +113,8 @@ pub trait RegularFile   : File {
     fn copy_page(&self, offset: usize) -> Result<PageGuard, ErrorNum>;
     /// get the original page, fail if not aligned.
     fn get_page(&self, offset: usize) -> Result<PageGuard, ErrorNum>;
+    /// seek cursor
+    fn seek(&self, offset: usize) -> Result<usize, ErrorNum>;
     
     // fn register_mmap(self: Arc<Self>, mem_layout: &mut MemLayout, offset: usize, length: usize) -> Result<VirtPageNum, ErrorNum>;
 }

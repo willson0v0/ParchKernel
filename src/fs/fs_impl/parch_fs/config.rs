@@ -17,7 +17,7 @@ pub const BLK_SIZE: usize = PAGE_SIZE;
 pub const INODE_SIZE: usize = 256;
 pub const DENTRY_SIZE: usize = 128;
 pub const SUPERBLOCK_SIZE: usize = PAGE_SIZE;
-pub const INODE_BITMAP_SIZE: usize = BLK_SIZE;
+pub const INODE_BITMAP_SIZE: usize = BLK_SIZE * 8;
 pub const INODE_LIST_SIZE: usize = 512 * BLK_SIZE;
 
 

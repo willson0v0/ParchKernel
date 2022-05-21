@@ -58,10 +58,16 @@ impl MountManagerInner {
     }
 
     pub fn open(&self, path: &Path, mode: OpenMode) -> Result<Arc<dyn File>, ErrorNum> {
+        if mode.contains(OpenMode::CREATE) {
+            self.make_file(path, Permission::default(), FileType::REGULAR)?;
+        }
         self.open_path_inner(self.root_fs.root_dir(mode)?.as_file(), path, mode, 0)
     }
 
     pub fn open_at(&self, src: Arc<dyn File>, path: &Path, mode: OpenMode) -> Result<Arc<dyn File>, ErrorNum> {
+        if mode.contains(OpenMode::CREATE) {
+            self.make_file_at(path, src.clone(), Permission::default(), FileType::REGULAR)?;
+        }
         self.open_path_inner(src, path, mode, 0)
     }
 
@@ -132,8 +138,12 @@ impl MountManagerInner {
     }
     
     pub fn make_file(&self, path: &Path, perm: Permission, f_type: FileType) -> Result<(), ErrorNum> {
+        self.make_file_at(path, self.root_fs.root_dir(OpenMode::SYS)?.as_file(), perm, f_type)
+    }
+
+    pub fn make_file_at(&self, path: &Path, root: Arc<dyn File>, perm: Permission, f_type: FileType) -> Result<(), ErrorNum> {
         verbose!("make file for {:?}, type {:?}", path, f_type);
-        let dir = self.open(&path.strip_tail(), OpenMode::READ | OpenMode::WRITE)?.as_dir()?;
+        let dir = self.open_at(root, &path.strip_tail(), OpenMode::READ | OpenMode::WRITE)?.as_dir()?;
         dir.make_file(path.last().clone(), perm, f_type)?;
         Ok(())
     }

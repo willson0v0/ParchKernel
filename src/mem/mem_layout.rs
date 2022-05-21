@@ -110,7 +110,7 @@ impl MemLayout {
             && !dev_l.unit_name.starts_with("cpu") {
                 let ranges = dev_l.reg_value().unwrap();
                 for range in ranges {
-                    debug!("registering mmio 0x{:x} ~ 0x{:x}", range.address, range.address+range.size);
+                    verbose!("registering mmio 0x{:x} ~ 0x{:x}", range.address, range.address+range.size);
                     layout.register_segment(
                         IdenticalMappingSegment::new(
                             VPNRange::new(

@@ -2,7 +2,7 @@ use core::{mem::size_of};
 
 use alloc::{vec::Vec, sync::Arc, collections::LinkedList, borrow::ToOwned, string::String};
 
-use crate::{process::{FileDescriptor, get_processor, push_sum_on, pop_sum_on, enqueue, ProcessStatus, ProcessID, get_process, SignalNum, free_current}, mem::{VirtAddr, VMASegment, SegmentFlags, ManagedSegment, VPNRange, stat_mem, MMAPType}, utils::{ErrorNum}, fs::{Path, open, OpenMode, open_at, new_pipe}, interrupt::trap_context::TrapContext, config::PHYS_END_ADDR};
+use crate::{config::PHYS_END_ADDR, fs::{FileType, OpenMode, Path, Permission, delete, make_file, new_pipe, open, open_at}, interrupt::trap_context::TrapContext, mem::{VirtAddr, VMASegment, SegmentFlags, ManagedSegment, VPNRange, stat_mem, MMAPType}, process::{FileDescriptor, get_processor, push_sum_on, pop_sum_on, enqueue, ProcessStatus, ProcessID, get_process, SignalNum, free_current}, utils::{ErrorNum}};
 
 use super::{syscall_num::*, types::{MMAPProt, MMAPFlag, SyscallDirent, SyscallStat}};
 
@@ -30,6 +30,9 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> Result<usize, ErrorNum> {
         SYSCALL_PIPE        => CALL_SYSCALL!(do_trace, sys_pipe         , VirtAddr::from(args[0])),
         SYSCALL_SYSSTAT     => CALL_SYSCALL!(do_trace, sys_sysstat      , VirtAddr::from(args[0])),
         SYSCALL_IOCTL       => CALL_SYSCALL!(do_trace, sys_ioctl        , FileDescriptor::from(args[0]), args[1], VirtAddr::from(args[2]), args[3], VirtAddr::from(args[4]), args[5]),
+        SYSCALL_DELETE      => CALL_SYSCALL!(do_trace, sys_delete       , VirtAddr::from(args[0])),
+        SYSCALL_MKDIR       => CALL_SYSCALL!(do_trace, sys_mkdir        , VirtAddr::from(args[0]), Permission::from_bits_truncate(args[1] as u16)),
+        SYSCALL_SEEK        => CALL_SYSCALL!(do_trace, sys_seek         , FileDescriptor::from(args[0]), args[1]),
         _ => CALL_SYSCALL!(true, sys_unknown, syscall_id)
     }
 }
@@ -161,9 +164,7 @@ pub fn sys_exec(elf_path: VirtAddr, argv: VirtAddr) -> Result<usize, ErrorNum> {
         push_sum_on();
         loop {
             let argv_str: VirtAddr = unsafe{ p.read_volatile() };
-            if argv_str.0 == 0 {
-                break;
-            }
+            if argv_str.0 == 0 {break;}
             let mut bytes = argv_str.read_cstr_raw(1023);
             bytes.push(0);
             args.push(bytes);
@@ -436,6 +437,30 @@ pub fn sys_ioctl(fd: FileDescriptor, op: usize, buf: VirtAddr, length: usize, ta
     }
     unsafe{target.write_data(res)};
     Ok(res_len)
+}
+
+pub fn sys_delete(buf: VirtAddr) -> Result<usize, ErrorNum> {
+    let (path, _) = buf.read_cstr()?;
+    let path = Path::from(path);
+    delete(&path)?;
+    Ok(0)
+}
+
+pub fn sys_mkdir(buf: VirtAddr, permission: Permission) -> Result<usize, ErrorNum> {
+    let (path, _) = buf.read_cstr()?;
+    let prefix = if !path.starts_with('/') {
+        get_processor().current().unwrap().get_inner().cwd.clone()
+    } else {
+        Path::root()
+    };
+    let path = prefix.concat(&Path::from(path));
+    make_file(&path, permission, FileType::DIR)?;
+    Ok(0)
+}
+
+pub fn sys_seek(fd: FileDescriptor, offset: usize) -> Result<usize, ErrorNum> {
+    let file = get_processor().current().unwrap().get_inner().get_file(fd)?.clone().as_regular()?;
+    file.seek(offset)
 }
 
 pub fn sys_unknown(syscall_id:usize) -> Result<usize, ErrorNum> {

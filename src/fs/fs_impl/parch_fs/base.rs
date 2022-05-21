@@ -267,11 +267,14 @@ impl PFSBase {
             let pa = ParchFS::blockno_2_pa(blk);
             // offset to pa
             let dst_start = offset % BLK_SIZE;
-            let dst_end = if target > offset + (BLK_SIZE - dst_start) {
+            let dst_end = if target >= offset + (BLK_SIZE - dst_start) {
                 BLK_SIZE
             } else {
                 target % BLK_SIZE
             };
+            if dst_end < dst_start {
+                panic!("wtf");
+            }
             let cpy_size = dst_end - dst_start;
 
             let src_start = data_ptr;
@@ -310,7 +313,7 @@ impl PFSBase {
             let pa = ParchFS::blockno_2_pa(blk);
 
             let cpy_start = offset % BLK_SIZE;
-            let cpy_end = if target > offset + (BLK_SIZE - cpy_start) {
+            let cpy_end = if target >= offset + (BLK_SIZE - cpy_start) {
                 BLK_SIZE
             } else {
                 target % BLK_SIZE
