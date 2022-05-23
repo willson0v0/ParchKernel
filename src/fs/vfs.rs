@@ -44,9 +44,9 @@ impl Into<SegmentFlags> for OpenMode {
 pub trait VirtualFileSystem : Send + Sync + Debug {
     fn link(&self, dest: Arc<dyn File>, link_file: &Path) -> Result<Arc<dyn File>, ErrorNum>;
     fn mount_path(&self) -> Path;
-    fn as_vfs<'a>(self: Arc<Self>) -> Arc<dyn VirtualFileSystem + 'a> where Self: 'a;
     fn get_uuid(&self) -> UUID;
     fn root_dir(&self, mode: OpenMode) -> Result<Arc<dyn DirFile>, ErrorNum>;
+    fn as_vfs<'a>(self: Arc<Self>) -> Arc<dyn VirtualFileSystem + 'a> where Self: 'a;
     fn as_any<'a>(self: Arc<Self>) -> Arc<dyn Any + Send + Sync>;
 }
 

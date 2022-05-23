@@ -36,7 +36,7 @@ extern crate static_assertions;
 extern crate elf_rs;
 extern crate fdt_rs;
 
-use core::{arch::{global_asm, asm}, sync::atomic::{AtomicBool, Ordering}};
+use core::{arch::{global_asm, asm}, sync::atomic::{AtomicBool, AtomicUsize, Ordering}};
 
 global_asm!(include_str!("crt_setup.asm"));
 global_asm!(include_str!("interrupt/kernel_trap.asm"));
@@ -46,7 +46,7 @@ global_asm!(include_str!("interrupt/u_trampoline.asm"));
 
 use riscv::register::{medeleg, mepc, mideleg, mie, mscratch, mstatus, mtvec, pmpaddr0, pmpcfg0, satp, sie};
 
-use crate::process::get_hart_id;
+use crate::{process::get_hart_id, utils::RWLock};
 
 #[no_mangle]
 #[link_section = ".bss"]
@@ -56,7 +56,10 @@ static mut MSCRATCH_ARR: [[usize; 6]; config::MAX_CPUS] = [[0; 6]; config::MAX_C
 static mut HART_REGISTER: [bool; config::MAX_CPUS] = [false; config::MAX_CPUS];
 #[no_mangle]
 #[link_section = ".bss"]
-static BOOT_FIN: AtomicBool = AtomicBool::new(false);
+static LV1_BOOT_FIN: AtomicBool = AtomicBool::new(false);
+#[no_mangle]
+#[link_section = ".bss"]
+static LV2_BOOT_FIN: AtomicUsize = AtomicUsize::new(0);
 
 #[no_mangle]
 extern "C" fn genesis_m(hart_id: usize) -> ! {
@@ -148,13 +151,15 @@ extern "C" fn genesis_s() -> ! {
         process::init();
 
         milestone!("Hart 0 boot sequence done.");
-        {BOOT_FIN.store(true, Ordering::Release);}
+        {LV1_BOOT_FIN.store(true, Ordering::Release);}
     } else {
-        while !BOOT_FIN.load(Ordering::Acquire) {}
+        while !LV1_BOOT_FIN.load(Ordering::Acquire) {}
         mem::hart_init();
-        interrupt::init_hart();
+        // interrupt::init_hart();
     }
-    
+    LV2_BOOT_FIN.fetch_add(1, Ordering::SeqCst);
+    while LV2_BOOT_FIN.load(Ordering::SeqCst) < device::DEVICE_MANAGER.acquire_r().get_dev_tree().hart_count() {}
+    if get_hart_id() == 0 {milestone!("Boot finished. Starting scheduler.");}
     process::hart_init();
     
     unreachable!();

@@ -8,7 +8,7 @@ use riscv::register::{scause::{   // s cause register
         Interrupt,
     }, sepc, sip, sstatus::{self, SPP}, stval, stvec};
 
-use super::PLIC0;
+// use super::PLIC0;
 use crate::{config::{UART0_IRQ, TRAMPOLINE_ADDR, PROC_K_STACK_ADDR, PROC_K_STACK_SIZE, TRAP_CONTEXT_ADDR, PROC_U_STACK_ADDR, PROC_U_STACK_SIZE, U_TRAMPOLINE_ADDR, PHYS_END_ADDR}, interrupt::trap_context::TrapContext, mem::{VirtAddr, PhysPageNum, PhysAddr, PPNRange, PageTable, PTEFlags}, process::{get_processor, ProcessStatus, intr_off, get_hart_id, intr_on, def_handler::def_ignore, SignalNum}, syscall::{syscall, syscall_num::SYSCALL_EXEC}, utils::{Mutex, RWLock}};
 use crate::device::DEVICE_MANAGER;
 

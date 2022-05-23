@@ -131,7 +131,7 @@ pub struct PFSINode {
     pub access_time         : usize,
     pub change_time         : usize,
     pub create_time         : usize,
-    pub mount_info          : [u8; 16], // uuid
+    pub mount_info          : [u8; 16], // unused.
     pub reserved            : [u8; 112]
 }
 
@@ -380,7 +380,14 @@ impl PFSDirInner {
                         ));
                         // keep the inode and free after it's children are freed.
                     } else {
-                        fs_inner.free_inode(e.inode.into());
+                        let base = PFSBase{
+                            inode_no: e.inode,
+                            open_mode: OpenMode::SYS,
+                            fs: self.base.fs.clone(),
+                            path: self.base.path.append(e.name()).unwrap(),
+                        };
+                        base.resize_locked(0, &mut fs_inner, &mut inode).unwrap();
+                        fs_inner.free_inode(e.inode.into());    
                     }
                 }
                 drop(inode);
@@ -392,6 +399,7 @@ impl PFSDirInner {
         for c in children_dir {
             c.0.acquire().remove_self();
         }
+        self.base.resize(0).unwrap();
         self.base.fs.upgrade().unwrap().inner.acquire().free_inode(self.base.inode_no);
     }
 }
@@ -602,6 +610,13 @@ impl DirFile for PFSDir {
                 } else {
                     inode.hard_link_count -= 1;
                     if inode.hard_link_count == 0 {
+                        let base = PFSBase {
+                            inode_no: e.inode.into(),
+                            open_mode: OpenMode::SYS,
+                            fs: inner.base.fs.clone(),
+                            path: inner.base.path.append(e.f_name.clone()).unwrap(),
+                        };
+                        base.resize_locked(0, &mut fs_inner, &mut inode).unwrap();
                         fs_inner.free_inode(e.inode.into());
                     }
                     drop(fs_inner);

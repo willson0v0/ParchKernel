@@ -174,11 +174,11 @@ impl PFSBase {
             return Ok(());
         }
 
-        if new_size == 0 {
-            return Err(ErrorNum::EEMPTY);
-        }
-
-        let shrink_start = (new_size - 1) / BLK_SIZE + 1;
+        let shrink_start = if new_size == 0 {
+            0
+        }else{
+            (new_size - 1) / BLK_SIZE + 1
+        };
 
         if shrink_start <= DIRECT_BLK_COUNT + BLOCKNO_PER_BLK {
             // all lv2 are gone
