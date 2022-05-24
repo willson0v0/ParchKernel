@@ -254,7 +254,12 @@ impl DeviceTree {
     }
 
     pub fn hart_count(&self) -> usize {
-        self.search("device_type", DTBPropertyValue::CStr("cpu".to_string())).unwrap().len()
+        let res = self.search("device_type", DTBPropertyValue::CStr("cpu".to_string())).unwrap().len();
+        if res == 0 {
+            1
+        } else {
+            res
+        }
     }
 
     pub fn contains_field(&self, field: &str) -> Result<Vec<Arc<SpinRWLock<DTBNode>>>, ErrorNum> {

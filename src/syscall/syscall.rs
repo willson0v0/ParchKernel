@@ -34,6 +34,7 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> Result<usize, ErrorNum> {
         SYSCALL_DELETE      => CALL_SYSCALL!(do_trace, sys_delete       , VirtAddr::from(args[0])),
         SYSCALL_MKDIR       => CALL_SYSCALL!(do_trace, sys_mkdir        , VirtAddr::from(args[0]), Permission::from_bits_truncate(args[1] as u16)),
         SYSCALL_SEEK        => CALL_SYSCALL!(do_trace, sys_seek         , FileDescriptor::from(args[0]), args[1]),
+        SYSCALL_TIME        => CALL_SYSCALL!(do_trace, sys_time         ),
         _ => CALL_SYSCALL!(true, sys_unknown, syscall_id)
     }
 }
@@ -464,6 +465,10 @@ pub fn sys_mkdir(buf: VirtAddr, permission: Permission) -> Result<usize, ErrorNu
 pub fn sys_seek(fd: FileDescriptor, offset: usize) -> Result<usize, ErrorNum> {
     let file = get_processor().current().unwrap().get_inner().get_file(fd)?.clone().as_regular()?;
     file.seek(offset)
+}
+
+pub fn sys_time() -> Result<usize, ErrorNum> {
+    Ok(crate::utils::time::get_time_ms() as usize)
 }
 
 pub fn sys_unknown(syscall_id:usize) -> Result<usize, ErrorNum> {

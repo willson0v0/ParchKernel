@@ -321,7 +321,8 @@ impl Driver for UART {
     fn new(dev_tree: crate::device::DeviceTree) -> Result<alloc::vec::Vec<(UUID, alloc::sync::Arc<dyn Driver>)>, crate::utils::ErrorNum> where Self: Sized {
         let mut res = Vec::new();
         
-        let compatible = dev_tree.serach_compatible("ns16550a")?;
+        let mut compatible = dev_tree.serach_compatible("ns16550a")?;
+        compatible.extend(dev_tree.serach_compatible("ns8250")?);
         for c in compatible {
             let node = c.acquire_r();
             let uuid = node.driver;

@@ -23,3 +23,4 @@ pub const SYSCALL_MKDIR     : usize =  21;
 pub const SYSCALL_IOCTL     : usize =  22;
 pub const SYSCALL_DELETE    : usize =  23;
 pub const SYSCALL_SEEK      : usize =  24;
+pub const SYSCALL_TIME      : usize =  25;

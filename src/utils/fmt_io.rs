@@ -3,7 +3,7 @@
 
 use alloc::{string::String, sync::Arc};
 
-use crate::{process::{push_intr_off, pop_intr_off, get_hart_id, get_processor}, utils::time::{get_time, get_time_ms, get_time_second}, println, print, print_no_lock};
+use crate::{process::{push_intr_off, pop_intr_off, get_hart_id, get_processor}, utils::time::{get_cycle, get_time_ms, get_time_second}, println, print, print_no_lock};
 
 use super::{SpinMutex, Mutex};
 use core::fmt::{self, Write};

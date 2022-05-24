@@ -158,7 +158,7 @@ extern "C" fn genesis_s() -> ! {
         // interrupt::init_hart();
     }
     LV2_BOOT_FIN.fetch_add(1, Ordering::SeqCst);
-    while LV2_BOOT_FIN.load(Ordering::SeqCst) < device::DEVICE_MANAGER.acquire_r().get_dev_tree().hart_count() {}
+    // while LV2_BOOT_FIN.load(Ordering::SeqCst) < device::DEVICE_MANAGER.acquire_r().get_dev_tree().hart_count() {}
     if get_hart_id() == 0 {milestone!("Boot finished. Starting scheduler.");}
     process::hart_init();
     

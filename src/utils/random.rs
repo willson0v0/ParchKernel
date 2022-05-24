@@ -23,7 +23,7 @@ impl XorShiftStateInner {
     pub fn new() -> Self {
         Self {
             x: [
-                super::time::get_time() % crate::config::CLOCK_FREQ, 
+                super::time::get_cycle() % crate::config::CLOCK_FREQ, 
                 super::time::get_real_time_epoch()
             ]
         }

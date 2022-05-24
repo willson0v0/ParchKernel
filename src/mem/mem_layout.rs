@@ -3,7 +3,7 @@ use core::{arch::asm};
 use alloc::{vec::Vec, sync::Arc, string::String};
 use riscv::register::{satp};
 use crate::{config::{PHYS_END_ADDR, MMIO_RANGES, PAGE_SIZE, PROC_U_STACK_ADDR}, fs::RegularFile, mem::{TrampolineSegment, UTrampolineSegment, TrapContextSegment, IdenticalMappingSegment, segment::{SegmentFlags, ProgramSegment}, VirtAddr, types::VPNRange, VMASegment}, process::{get_processor, get_hart_id}, utils::{ErrorNum, RWLock}};
-use super::{PageTable, VirtPageNum, ProcKStackSegment, segment::ProcUStackSegment, ArcSegment, MMAPType};
+use super::{ArcSegment, MMAPType, PageTable, ProcKStackSegment, Segment, VirtPageNum, segment::ProcUStackSegment};
 use crate::device::DEVICE_MANAGER;
 use crate::utils::elf_rs_wrapper::read_elf;
 use elf_rs::*;
@@ -405,6 +405,10 @@ impl MemLayout {
 
     pub fn unmap_vma(&mut self, head: VirtAddr, length: usize) -> Result<(), ErrorNum> {
         let seg = self.get_segment(head.into())?.as_vma()?;
-        seg.unmap_part(head, length, &mut self.pagetable)
+        seg.unmap_part(head, length, &mut self.pagetable)?;
+        if seg.is_empty() {
+            self.remove_segment(ArcSegment(seg.as_segment()))?;
+        }
+        Ok(())
     }
 }

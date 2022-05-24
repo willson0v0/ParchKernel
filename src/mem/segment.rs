@@ -611,8 +611,9 @@ impl Segment for VMASegment {
                     inner.frames.insert(vpn, PageGuardSlot::Populated(pg));
                 },
                 PageGuardSlot::LazyVMAShared((file, offset)) => {
+                    verbose!("lazy vma shared triggered");
                     let pg = file.get_page(offset)?;
-                    verbose!("lazy vma shared triggered, fs report actual content at {:?}", pg);
+                    verbose!("fs report actual content at {:?}", pg);
                     pagetable.map(vpn, pg.ppn, inner.flag.into());
                     inner.frames.insert(vpn, PageGuardSlot::Populated(pg));
                 },
@@ -1246,7 +1247,12 @@ impl VMASegment {
                 return Err(ErrorNum::EACCES);
             }
         }
+        inner.frames.retain(|_k, v| !v.is_unmapped());
         Ok(())
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.acquire().frames.is_empty()
     }
 }
 
