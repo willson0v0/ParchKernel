@@ -1,6 +1,6 @@
 use core::sync::atomic::{Ordering, AtomicUsize};
 
-use alloc::{collections::{VecDeque}, sync::Arc, vec::Vec};
+use alloc::{collections::{VecDeque}, sync::{Arc, Weak}, vec::Vec};
 use lazy_static::*;
 
 use crate::{utils::{SpinMutex, MutexGuard, Mutex, ErrorNum}, config::MAX_CPUS};
@@ -28,7 +28,7 @@ impl ProcessManager {
 
 struct ProcessManagerInner{
     pub process_list: VecDeque<Arc<ProcessControlBlock>>,
-    pub running_list: [Option<Arc<ProcessControlBlock>>; MAX_CPUS]
+    pub running_list: [Option<Weak<ProcessControlBlock>>; MAX_CPUS]
 }
 
 impl ProcessManagerInner {
@@ -47,8 +47,7 @@ impl ProcessManagerInner {
     /// guard by mutex, intr off, get_hart_id safe.
     pub fn dequeue(&mut self) -> Option<Arc<ProcessControlBlock>> {
         if let Some(proc ) = self.process_list.pop_front() {
-            assert!(self.running_list[get_hart_id()].is_none()); 
-            self.running_list[get_hart_id()] = Some(proc.clone());
+            self.running_list[get_hart_id()] = Some(Arc::downgrade(&proc));
             Some(proc)
         } else {
             None
@@ -67,8 +66,10 @@ impl ProcessManagerInner {
         }
         for proc in self.running_list.iter() {
             if let Some(proc) = proc {
-                if proc.pid == pid {
-                    return Ok(proc.clone());
+                if let Some(proc) = proc.upgrade() {
+                    if proc.pid == pid {
+                        return Ok(proc.clone());
+                    }
                 }
             }
         }
@@ -79,7 +80,9 @@ impl ProcessManagerInner {
         let mut res: Vec<Arc<ProcessControlBlock>> = self.process_list.clone().into();
         for p in self.running_list.iter() {
             if let Some(v) = p.clone() {
-                res.push(v)
+                if let Some(v) = v.upgrade() {
+                    res.push(v)
+                }
             }
         }
         res

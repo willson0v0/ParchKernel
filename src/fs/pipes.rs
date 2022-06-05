@@ -34,18 +34,16 @@ impl PipeBuffer {
         inner.buffer.extend(data.iter());
     }
 
-    pub fn read(&self, length: usize) -> Vec<u8> {
+    pub fn read(&self, length: usize) -> Option<Vec<u8>> {
         let mut inner = self.inner.acquire();
-        while length >= inner.buffer.len() {
-            // sleep wait.
-            drop(inner);
-            get_processor().suspend_switch();
-            inner = self.inner.acquire();
+        if length <= inner.buffer.len() {
+            let new_buf = inner.buffer.split_off(length);
+            let res = inner.buffer.clone();
+            inner.buffer = new_buf;
+            Some(res.into())
+        } else {
+            None
         }
-        let new_buf = inner.buffer.split_off(length);
-        let res = inner.buffer.clone();
-        inner.buffer = new_buf;
-        res.into()
     }
 }
 
@@ -148,10 +146,16 @@ impl File for PipeReadEnd {
     }
 
     fn read (&self, length: usize) -> Result<alloc::vec::Vec<u8>, crate::utils::ErrorNum> {
-        if let Some(buf) = self.buffer.upgrade() {
-            Ok(buf.read(length))
-        } else {
-            Err(ErrorNum::EPIPE)
+        loop {
+            if let Some(buf) = self.buffer.upgrade() {
+                if let Some(res) = buf.read(length) {
+                    return Ok(res);
+                } else {
+                    get_processor().suspend_switch();
+                }
+            } else {
+                return Err(ErrorNum::EPIPE);
+            }
         }
     }
 

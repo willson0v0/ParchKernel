@@ -188,8 +188,6 @@ pub fn sys_exec(elf_path: VirtAddr, argv: VirtAddr) -> Result<usize, ErrorNum> {
 pub fn sys_exit(exit_code: isize) -> Result<usize, ErrorNum> {
     let processor = get_processor();
     info!("Application {} exited with code {:}", processor.current().unwrap().pid, exit_code);
-    // un-register it from process manager
-    free_current();
     processor.exit_switch(exit_code);
     // unreachable!("This part should be unreachable. Go check __switch.")
 }
