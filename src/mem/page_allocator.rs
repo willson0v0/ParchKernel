@@ -106,7 +106,7 @@ impl BitMapPageAllocator {
 }
 
 impl PageAllocator for BitMapPageAllocator {
-    fn new(begin: PhysAddr, length: usize) -> Self {
+    fn new(_begin: PhysAddr, _length: usize) -> Self {
 		verbose!("Initializeing BitMapPageAllocator");
         let res = Self {
 			bitmap_mm: BitMap::new((PAGE_BITMAP_MM_ADDRESS as usize).into(), (PAGE_BITMAP_FS_ADDRESS as usize - PAGE_BITMAP_MM_ADDRESS as usize) * 8),

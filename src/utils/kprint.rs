@@ -1,15 +1,15 @@
 
 
-use alloc::boxed::Box;
-use alloc::collections::VecDeque;
+
+
 use alloc::sync::Arc;
 
-use crate::mem::PhysAddr;
-use crate::utils::{SpinMutex, Mutex};
+
+use crate::utils::{SpinMutex};
 use lazy_static::*;
-use crate::config::UART0_ADDR;
+
 use crate::device::Driver;
-use crate::device::drivers::*;
+
 
 lazy_static!{
     pub static ref K_PRINT_HANDLER: SpinMutex<KPrintHandler> = SpinMutex::new("k print", KPrintHandler{uart_driver: None});

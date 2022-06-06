@@ -11,11 +11,11 @@ pub struct FDDir {
 }
 
 impl File for FDDir {
-    fn write(&self, data: alloc::vec::Vec::<u8>) -> Result<usize, crate::utils::ErrorNum> {
+    fn write(&self, _data: alloc::vec::Vec::<u8>) -> Result<usize, crate::utils::ErrorNum> {
         Err(ErrorNum::EPERM)
     }
 
-    fn read(&self, length: usize) -> Result<alloc::vec::Vec<u8>, crate::utils::ErrorNum> {
+    fn read(&self, _length: usize) -> Result<alloc::vec::Vec<u8>, crate::utils::ErrorNum> {
         Err(ErrorNum::EPERM)
     }
 
@@ -71,7 +71,7 @@ impl File for FDDir {
 }
 
 impl DirFile for FDDir {
-    fn open_entry(&self, entry_name: &alloc::string::String, mode: crate::fs::OpenMode) -> Result<alloc::sync::Arc<dyn File>, crate::utils::ErrorNum> {
+    fn open_entry(&self, entry_name: &alloc::string::String, _mode: crate::fs::OpenMode) -> Result<alloc::sync::Arc<dyn File>, crate::utils::ErrorNum> {
         let fd: FileDescriptor = entry_name.parse::<usize>().map_err(|_| ErrorNum::ENOENT)?.into();
         let _fd_file_stat = get_process(self.pid)?.get_inner().get_file(fd)?.stat()?;
         Ok(Arc::new(FDLink{
@@ -80,11 +80,11 @@ impl DirFile for FDDir {
         }))
     }
 
-    fn make_file(&self, name: alloc::string::String, perm: crate::fs::types::Permission, f_type: crate::fs::types::FileType) -> Result<alloc::sync::Arc<dyn File>, crate::utils::ErrorNum> {
+    fn make_file(&self, _name: alloc::string::String, _perm: crate::fs::types::Permission, _f_type: crate::fs::types::FileType) -> Result<alloc::sync::Arc<dyn File>, crate::utils::ErrorNum> {
         Err(ErrorNum::EPERM)
     }
 
-    fn remove_file(&self, name: alloc::string::String) -> Result<(), crate::utils::ErrorNum> {
+    fn remove_file(&self, _name: alloc::string::String) -> Result<(), crate::utils::ErrorNum> {
         Err(ErrorNum::EPERM)
     }
 
@@ -128,11 +128,11 @@ pub struct FDLink {
 }
 
 impl File for FDLink {
-    fn write(&self, data: alloc::vec::Vec::<u8>) -> Result<usize, crate::utils::ErrorNum> {
+    fn write(&self, _data: alloc::vec::Vec::<u8>) -> Result<usize, crate::utils::ErrorNum> {
         Err(ErrorNum::EPERM)
     }
 
-    fn read(&self, length: usize) -> Result<alloc::vec::Vec<u8>, crate::utils::ErrorNum> {
+    fn read(&self, _length: usize) -> Result<alloc::vec::Vec<u8>, crate::utils::ErrorNum> {
         Err(ErrorNum::EPERM)
     }
 
@@ -194,7 +194,7 @@ impl LinkFile for FDLink {
         Ok(get_process(self.pid)?.get_inner().get_file(self.fd)?.stat()?.path)
     }
 
-    fn write_link(&self, path: &crate::fs::Path) -> Result<(), crate::utils::ErrorNum> {
+    fn write_link(&self, _path: &crate::fs::Path) -> Result<(), crate::utils::ErrorNum> {
         Err(ErrorNum::EPERM)
     }
 }

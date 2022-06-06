@@ -9,7 +9,7 @@ use riscv::register::{scause::{   // s cause register
     }, sepc, sip, sstatus::{self, SPP}, stval, stvec};
 
 // use super::PLIC0;
-use crate::{config::{UART0_IRQ, TRAMPOLINE_ADDR, PROC_K_STACK_ADDR, PROC_K_STACK_SIZE, TRAP_CONTEXT_ADDR, PROC_U_STACK_ADDR, PROC_U_STACK_SIZE, U_TRAMPOLINE_ADDR, PHYS_END_ADDR}, interrupt::trap_context::TrapContext, mem::{VirtAddr, PhysPageNum, PhysAddr, PPNRange, PageTable, PTEFlags}, process::{ProcessStatus, SignalNum, def_handler::{def_ignore, usr_sigreturn}, get_hart_id, get_processor, intr_off, intr_on}, syscall::{syscall, syscall_num::SYSCALL_EXEC}, utils::{Mutex, RWLock}};
+use crate::{config::{TRAMPOLINE_ADDR, PROC_K_STACK_ADDR, PROC_K_STACK_SIZE, TRAP_CONTEXT_ADDR, PROC_U_STACK_ADDR, PROC_U_STACK_SIZE, U_TRAMPOLINE_ADDR}, interrupt::trap_context::TrapContext, mem::{VirtAddr}, process::{ProcessStatus, SignalNum, def_handler::{usr_sigreturn}, get_hart_id, get_processor, intr_off, intr_on}, syscall::{syscall, syscall_num::SYSCALL_EXEC}, utils::{Mutex, RWLock}};
 use crate::device::DEVICE_MANAGER;
 
 /// Set trap entry to kernel trap handling function.

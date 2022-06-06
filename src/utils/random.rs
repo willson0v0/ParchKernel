@@ -1,7 +1,7 @@
 use crate::{config::UUID_LENGTH, utils::Mutex};
 
 use super::SpinMutex;
-use alloc::string::String;
+
 use lazy_static::*;
 use core::hash::Hash;
 use core::fmt::{Debug, Display};

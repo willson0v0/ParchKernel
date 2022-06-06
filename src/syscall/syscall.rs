@@ -2,7 +2,7 @@ use core::{mem::size_of};
 
 use alloc::{vec::Vec, sync::Arc, collections::LinkedList, borrow::ToOwned, string::String};
 
-use crate::{config::PHYS_END_ADDR, fs::{FileType, OpenMode, Path, Permission, delete, make_file, new_pipe, open, open_at}, interrupt::trap_context::TrapContext, mem::{VirtAddr, VMASegment, SegmentFlags, ManagedSegment, VPNRange, stat_mem, MMAPType}, process::{FileDescriptor, get_processor, push_sum_on, pop_sum_on, enqueue, ProcessStatus, ProcessID, get_process, SignalNum, free_current}, utils::{ErrorNum}};
+use crate::{config::PHYS_END_ADDR, fs::{FileType, OpenMode, Path, Permission, delete, make_file, new_pipe, open, open_at}, interrupt::trap_context::TrapContext, mem::{VirtAddr, VMASegment, SegmentFlags, ManagedSegment, VPNRange, stat_mem, MMAPType}, process::{FileDescriptor, get_processor, push_sum_on, pop_sum_on, enqueue, ProcessStatus, ProcessID, get_process, SignalNum}, utils::{ErrorNum}};
 
 use super::{syscall_num::*, types::{MMAPProt, MMAPFlag, SyscallDirent, SyscallStat}};
 

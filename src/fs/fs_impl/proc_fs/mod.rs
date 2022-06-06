@@ -18,7 +18,7 @@ pub struct ProcFS {
 }
 
 impl VirtualFileSystem for ProcFS {
-    fn link(&self, dest: alloc::sync::Arc<dyn crate::fs::File>, link_file: &crate::fs::Path) -> Result<alloc::sync::Arc<dyn crate::fs::File>, crate::utils::ErrorNum> {
+    fn link(&self, _dest: alloc::sync::Arc<dyn crate::fs::File>, _link_file: &crate::fs::Path) -> Result<alloc::sync::Arc<dyn crate::fs::File>, crate::utils::ErrorNum> {
         Err(ErrorNum::EROFS)
     }
 
@@ -34,7 +34,7 @@ impl VirtualFileSystem for ProcFS {
         self.uuid
     }
 
-    fn root_dir(&self, mode: crate::fs::OpenMode) -> Result<alloc::sync::Arc<dyn crate::fs::DirFile>, crate::utils::ErrorNum> {
+    fn root_dir(&self, _mode: crate::fs::OpenMode) -> Result<alloc::sync::Arc<dyn crate::fs::DirFile>, crate::utils::ErrorNum> {
         Ok(ROOT_DIR.clone())
     }
 

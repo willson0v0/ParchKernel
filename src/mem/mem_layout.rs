@@ -2,7 +2,7 @@ use core::{arch::asm};
 
 use alloc::{vec::Vec, sync::Arc, string::String};
 use riscv::register::{satp};
-use crate::{config::{PHYS_END_ADDR, MMIO_RANGES, PAGE_SIZE, PROC_U_STACK_ADDR}, fs::RegularFile, mem::{TrampolineSegment, UTrampolineSegment, TrapContextSegment, IdenticalMappingSegment, segment::{SegmentFlags, ProgramSegment}, VirtAddr, types::VPNRange, VMASegment}, process::{get_processor, get_hart_id}, utils::{ErrorNum, RWLock}};
+use crate::{config::{PHYS_END_ADDR, PAGE_SIZE, PROC_U_STACK_ADDR}, fs::RegularFile, mem::{TrampolineSegment, UTrampolineSegment, TrapContextSegment, IdenticalMappingSegment, segment::{SegmentFlags, ProgramSegment}, VirtAddr, types::VPNRange, VMASegment}, process::{get_processor, get_hart_id}, utils::{ErrorNum, RWLock}};
 use super::{ArcSegment, MMAPType, PageTable, ProcKStackSegment, Segment, VirtPageNum, segment::ProcUStackSegment};
 use crate::device::DEVICE_MANAGER;
 use crate::utils::elf_rs_wrapper::read_elf;

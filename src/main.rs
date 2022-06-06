@@ -46,7 +46,7 @@ global_asm!(include_str!("interrupt/u_trampoline.asm"));
 
 use riscv::register::{medeleg, mepc, mideleg, mie, mscratch, mstatus, mtvec, pmpaddr0, pmpcfg0, satp, sie};
 
-use crate::{process::get_hart_id, utils::RWLock};
+use crate::{process::get_hart_id};
 
 #[no_mangle]
 #[link_section = ".bss"]

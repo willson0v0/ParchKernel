@@ -10,7 +10,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::config::{PAGE_OFFSET, PAGE_SIZE};
-use crate::process::{push_sum_on, pop_sum_on, get_processor};
+use crate::process::{get_processor};
 use crate::utils::ErrorNum;
 use crate::utils::range::{StepUp, StepDown, Range};
 

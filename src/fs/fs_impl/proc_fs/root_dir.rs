@@ -1,6 +1,6 @@
 use alloc::{sync::Arc, vec::Vec, string::ToString};
 
-use crate::{fs::{File, DirFile, types::{FileStat, Permission}, OpenMode, VirtualFileSystem, fs_impl::proc_fs::{fd_dir::FDDir, proc_dir::{PidProcDir, SelfProcDir}}, open, Path, Dirent, DummyLink}, utils::ErrorNum, process::{ProcessID, get_process, process_list}};
+use crate::{fs::{File, DirFile, types::{FileStat, Permission}, OpenMode, VirtualFileSystem, fs_impl::proc_fs::{proc_dir::{PidProcDir, SelfProcDir}}, Dirent, DummyLink}, utils::ErrorNum, process::{ProcessID, get_process, process_list}};
 
 use super::{PROC_FS};
 
@@ -14,11 +14,11 @@ lazy_static!{
 pub struct RootDir;
 
 impl File for RootDir {
-    fn write(&self, data: alloc::vec::Vec::<u8>) -> Result<usize, crate::utils::ErrorNum> {
+    fn write(&self, _data: alloc::vec::Vec::<u8>) -> Result<usize, crate::utils::ErrorNum> {
         Err(ErrorNum::EISDIR)
     }
 
-    fn read(&self, length: usize) -> Result<alloc::vec::Vec<u8>, crate::utils::ErrorNum> {
+    fn read(&self, _length: usize) -> Result<alloc::vec::Vec<u8>, crate::utils::ErrorNum> {
         Err(ErrorNum::EISDIR)
     }
 
@@ -74,7 +74,7 @@ impl File for RootDir {
 }
 
 impl DirFile for RootDir {
-    fn open_entry(&self, entry_name: &alloc::string::String, mode: OpenMode) -> Result<Arc<dyn File>, ErrorNum> {
+    fn open_entry(&self, entry_name: &alloc::string::String, _mode: OpenMode) -> Result<Arc<dyn File>, ErrorNum> {
         if entry_name == "self" {
             Ok(Arc::new(SelfProcDir{}))
         } else if entry_name == ".." {
@@ -96,11 +96,11 @@ impl DirFile for RootDir {
         }
     }
 
-    fn make_file(&self, name: alloc::string::String, perm: crate::fs::types::Permission, f_type: crate::fs::types::FileType) -> Result<alloc::sync::Arc<dyn File>, crate::utils::ErrorNum> {
+    fn make_file(&self, _name: alloc::string::String, _perm: crate::fs::types::Permission, _f_type: crate::fs::types::FileType) -> Result<alloc::sync::Arc<dyn File>, crate::utils::ErrorNum> {
         Err(ErrorNum::EPERM)
     }
 
-    fn remove_file(&self, name: alloc::string::String) -> Result<(), crate::utils::ErrorNum> {
+    fn remove_file(&self, _name: alloc::string::String) -> Result<(), crate::utils::ErrorNum> {
         Err(ErrorNum::EPERM)
     }
 

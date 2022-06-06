@@ -29,8 +29,6 @@ use crate::mem::PhysAddr;
 use core::fmt::Debug;
 use core::mem::size_of;
 
-use super::device_manager::Driver;
-
 
 /// The header of .dtb file (Flattened Devicetree)
 #[repr(C)]
@@ -210,7 +208,7 @@ impl DeviceTree {
         log!(log_level, "===== DeviceTree print begin =====");
         log!(log_level, " - Reserved memory regions: ");
         if self.reserved_mem.is_empty() {
-            log!(log_level, "\t(empty)")
+            log!(log_level, "\t(empty)");
         } else {
             for region in self.reserved_mem.iter() {
                 log!(log_level, "\t{:?} ~ {:?} ({} bytes)", region.start, region.start + region.length, region.length);

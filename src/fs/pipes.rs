@@ -1,7 +1,7 @@
 use alloc::{sync::{Arc, Weak}, collections::VecDeque, vec::Vec};
 use core::fmt::Debug;
 
-use crate::{fs::{File, FIFOFile, types::FileStat, OpenMode, Path, VirtualFileSystem}, utils::{SpinMutex, Mutex, ErrorNum}, process::get_processor};
+use crate::{fs::{File, FIFOFile, types::FileStat, OpenMode, Path}, utils::{SpinMutex, Mutex, ErrorNum}, process::get_processor};
 
 use super::open;
 
@@ -85,7 +85,7 @@ impl File for PipeWriteEnd {
         Ok(len)
     }
 
-    fn read (&self, length: usize) -> Result<alloc::vec::Vec<u8>, crate::utils::ErrorNum> {
+    fn read (&self, _length: usize) -> Result<alloc::vec::Vec<u8>, crate::utils::ErrorNum> {
         Err(ErrorNum::EPERM)
     }
 
@@ -141,7 +141,7 @@ impl File for PipeWriteEnd {
 }
 
 impl File for PipeReadEnd {
-    fn write (&self, data: alloc::vec::Vec::<u8>) -> Result<usize, crate::utils::ErrorNum> {
+    fn write (&self, _data: alloc::vec::Vec::<u8>) -> Result<usize, crate::utils::ErrorNum> {
         Err(ErrorNum::EPERM)
     }
 

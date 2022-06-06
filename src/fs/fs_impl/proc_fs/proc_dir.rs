@@ -1,4 +1,4 @@
-use alloc::{sync::Arc, borrow::ToOwned, vec::Vec, string::ToString};
+use alloc::{sync::Arc, vec::Vec, string::ToString};
 
 use crate::{fs::{File, DirFile, LinkFile, types::{FileStat, Permission}, OpenMode, Path, VirtualFileSystem, Dirent, DummyLink}, process::{ProcessID, get_process, get_processor}, utils::ErrorNum};
 
@@ -8,11 +8,11 @@ use super::{PROC_FS, fd_dir::FDDir};
 pub struct SelfProcDir;
 
 impl File for SelfProcDir {
-    fn write(&self, data: alloc::vec::Vec::<u8>) -> Result<usize, crate::utils::ErrorNum> {
+    fn write(&self, _data: alloc::vec::Vec::<u8>) -> Result<usize, crate::utils::ErrorNum> {
         Err(ErrorNum::EPERM)
     }
 
-    fn read(&self, length: usize) -> Result<alloc::vec::Vec<u8>, crate::utils::ErrorNum> {
+    fn read(&self, _length: usize) -> Result<alloc::vec::Vec<u8>, crate::utils::ErrorNum> {
         Err(ErrorNum::EPERM)
     }
 
@@ -72,7 +72,7 @@ impl LinkFile for SelfProcDir {
         Ok(format!("/proc/{}", get_processor().current().unwrap().pid.0).into())
     }
 
-    fn write_link(&self, path: &Path) -> Result<(), ErrorNum> {
+    fn write_link(&self, _path: &Path) -> Result<(), ErrorNum> {
         todo!()
     }
 }
@@ -83,11 +83,11 @@ pub struct PidProcDir{
 }
 
 impl File for PidProcDir {
-    fn write(&self, data: alloc::vec::Vec::<u8>) -> Result<usize, crate::utils::ErrorNum> {
+    fn write(&self, _data: alloc::vec::Vec::<u8>) -> Result<usize, crate::utils::ErrorNum> {
         Err(ErrorNum::EISDIR)
     }
 
-    fn read(&self, length: usize) -> Result<alloc::vec::Vec<u8>, crate::utils::ErrorNum> {
+    fn read(&self, _length: usize) -> Result<alloc::vec::Vec<u8>, crate::utils::ErrorNum> {
         Err(ErrorNum::EISDIR)
     }
 
@@ -143,11 +143,11 @@ impl File for PidProcDir {
 }
 
 impl DirFile for PidProcDir {
-    fn make_file(&self, name: alloc::string::String, perm: crate::fs::types::Permission, f_type: crate::fs::types::FileType) -> Result<alloc::sync::Arc<dyn File>, crate::utils::ErrorNum> {
+    fn make_file(&self, _name: alloc::string::String, _perm: crate::fs::types::Permission, _f_type: crate::fs::types::FileType) -> Result<alloc::sync::Arc<dyn File>, crate::utils::ErrorNum> {
         Err(ErrorNum::EPERM)
     }
 
-    fn remove_file(&self, name: alloc::string::String) -> Result<(), crate::utils::ErrorNum> {
+    fn remove_file(&self, _name: alloc::string::String) -> Result<(), crate::utils::ErrorNum> {
         Err(ErrorNum::EPERM)
     }
 
@@ -184,7 +184,7 @@ impl DirFile for PidProcDir {
         Ok(res)
     }
 
-    fn open_entry(&self, entry_name: &alloc::string::String, mode: OpenMode) -> Result<Arc<dyn File>, ErrorNum> {
+    fn open_entry(&self, entry_name: &alloc::string::String, _mode: OpenMode) -> Result<Arc<dyn File>, ErrorNum> {
         if entry_name == "self" {
             Ok(Arc::new(SelfProcDir{}))
         } else if entry_name == ".." {

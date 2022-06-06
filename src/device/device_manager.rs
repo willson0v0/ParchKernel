@@ -1,6 +1,6 @@
 use core::any::Any;
 use core::fmt::Debug;
-use alloc::{boxed::Box, collections::BTreeMap, string::String, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, collections::BTreeMap, sync::Arc, vec::Vec};
 // use fdt_rs::{base::{DevTree, DevTreeNode}, prelude::FallibleIterator};
 use lazy_static::*;
 use crate::{mem::PhysAddr, utils::{ErrorNum, Mutex, RWLock, SpinRWLock, UUID}};

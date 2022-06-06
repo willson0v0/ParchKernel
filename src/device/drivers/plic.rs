@@ -1,10 +1,10 @@
-use alloc::boxed::Box;
+
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use crate::device::DeviceTree;
 use crate::mem::PhysAddr;
 use crate::process::get_hart_id;
-use crate::utils::{ErrorNum, Mutex, RWLock, SpinMutex, UUID, cast_bytes};
+use crate::utils::{ErrorNum, Mutex, RWLock, SpinMutex, cast_bytes};
 use crate::device::device_manager::{Driver, IntController};
 use core::fmt::Debug;
 use core::mem::size_of;

@@ -1,4 +1,4 @@
-use crate::{mem::{PhysAddr, VMASegment}, utils::{SpinMutex, Mutex, ErrorNum, time::get_real_time_epoch, UUID}, fs::{RegularFile, File, BlockFile, DirFile, OpenMode, types::{FileType, Permission, Dirent}, Cursor, LinkFile}, config::PAGE_SIZE};
+use crate::{mem::{PhysAddr}, utils::{SpinMutex, Mutex, ErrorNum, time::get_real_time_epoch}, fs::{RegularFile, File, BlockFile, DirFile, OpenMode, types::{FileType, Permission, Dirent}, Cursor, LinkFile}};
 use super::{DIRECT_BLK_COUNT, INODE_SIZE, DENTRY_NAME_LEN, DENTRY_SIZE, fs::{ParchFS}, PFSBase, BAD_BLOCK, BAD_INODE};
 
 use core::mem::size_of;
@@ -7,7 +7,7 @@ use bitflags::*;
 use core::fmt::Debug;
 
 
-use alloc::{string::{String, ToString}, sync::{Weak, Arc}, vec::Vec};
+use alloc::{string::{String}, sync::{Weak, Arc}, vec::Vec};
 
 use static_assertions::*;
 

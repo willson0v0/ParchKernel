@@ -1,9 +1,9 @@
-use crate::{config::RTC_ADDR, fs::{VirtualFileSystem, Path, File, DirFile, types::{FileStat, Permission}, OpenMode, Dirent, DummyLink}, utils::{ErrorNum, RWLock, UUID}};
+use crate::{fs::{VirtualFileSystem, Path, File, DirFile, types::{FileStat, Permission}, OpenMode, Dirent, DummyLink}, utils::{ErrorNum, RWLock, UUID}};
 use core::fmt::Debug;
 
 use alloc::{borrow::ToOwned, collections::BTreeMap, string::{ToString, String}, sync::Arc, vec::Vec};
 use lazy_static::*;
-use crate::device::{DEVICE_MANAGER, Driver};
+use crate::device::{DEVICE_MANAGER};
 
 use super::Adapter;
 
@@ -133,7 +133,7 @@ impl DevFolder {
             "virtio,mmio",
         ];
         for comp in name_list {
-            let mut driver_list: Vec<(String, UUID)> = dev_tree.serach_compatible(comp).unwrap().iter().map(
+            let driver_list: Vec<(String, UUID)> = dev_tree.serach_compatible(comp).unwrap().iter().map(
                 |node| -> (String, UUID) {
                     let node_r = node.acquire_r();
                     (node_r.unit_name.clone(), node_r.driver)

@@ -1,10 +1,10 @@
-use alloc::boxed::Box;
-use alloc::string::ToString;
+
+
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 use crate::device::DeviceTree;
-use crate::device::device_tree::DTBPropertyValue;
+
 use crate::{device::device_manager::Driver, mem::PhysAddr};
 use crate::utils::{ErrorNum, RWLock, UUID};
 use core::fmt::Debug;
@@ -99,7 +99,7 @@ impl Driver for RTC {
         Err(ErrorNum::ENOTINTC)
     }
 
-    fn write(&self, data: alloc::vec::Vec::<u8>) -> Result<usize, crate::utils::ErrorNum> {
+    fn write(&self, _data: alloc::vec::Vec::<u8>) -> Result<usize, crate::utils::ErrorNum> {
         Err(ErrorNum::EPERM)
     }
 

@@ -1,6 +1,6 @@
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use alloc::{sync::Arc, vec::Vec};
 
-use crate::{device::{device_manager::Driver, device_tree::DTBPropertyValue}, mem::PhysAddr, utils::{RWLock, UUID}};
+use crate::{device::{device_manager::Driver, device_tree::DTBPropertyValue}, mem::PhysAddr, utils::{RWLock}};
 use core::{fmt::Debug, mem::size_of};
 use crate::utils::ErrorNum;
 
@@ -100,11 +100,11 @@ impl Driver for PowerOff {
         Err(ErrorNum::ENOTINTC)
     }
 
-    fn write(&self, data: alloc::vec::Vec::<u8>) -> Result<usize, crate::utils::ErrorNum> {
+    fn write(&self, _data: alloc::vec::Vec::<u8>) -> Result<usize, crate::utils::ErrorNum> {
         Err(ErrorNum::EPERM)
     }
 
-    fn read(&self, length: usize) -> Result<alloc::vec::Vec<u8>, ErrorNum> {
+    fn read(&self, _length: usize) -> Result<alloc::vec::Vec<u8>, ErrorNum> {
         Err(ErrorNum::EPERM)
     }
 }

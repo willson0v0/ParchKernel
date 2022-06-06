@@ -2,10 +2,10 @@
 //! kernel print use utils/uart.rs
 
 use core::mem::size_of;
-use alloc::{boxed::Box, collections::VecDeque, string::ToString, sync::Arc, vec::Vec};
+use alloc::{collections::VecDeque, sync::Arc, vec::Vec};
 
-use crate::{device::{device_manager::Driver, device_tree::DTBPropertyValue}, mem::PhysAddr, process::get_processor, utils::{Mutex, MutexGuard, RWLock, SpinMutex, UUID, cast_bytes}};
-use core::{any::Any, fmt::Debug};
+use crate::{device::{device_manager::Driver}, mem::PhysAddr, process::get_processor, utils::{Mutex, MutexGuard, RWLock, SpinMutex, UUID, cast_bytes}};
+use core::{fmt::Debug};
 use crate::utils::ErrorNum;
 use bitflags::*;
 

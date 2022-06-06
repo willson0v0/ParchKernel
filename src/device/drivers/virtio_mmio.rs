@@ -6,15 +6,15 @@ use crate::device::Driver;
 pub struct VirtIO {}
 
 impl Driver for VirtIO {
-    fn new(dev_tree: crate::device::DeviceTree) -> Result<alloc::vec::Vec<(crate::utils::UUID, alloc::sync::Arc<dyn Driver>)>, crate::utils::ErrorNum> where Self: Sized {
+    fn new(_dev_tree: crate::device::DeviceTree) -> Result<alloc::vec::Vec<(crate::utils::UUID, alloc::sync::Arc<dyn Driver>)>, crate::utils::ErrorNum> where Self: Sized {
         todo!()
     }
 
-    fn write(&self, data: alloc::vec::Vec::<u8>) -> Result<usize, crate::utils::ErrorNum> {
+    fn write(&self, _data: alloc::vec::Vec::<u8>) -> Result<usize, crate::utils::ErrorNum> {
         todo!()
     }
 
-    fn read(&self, length: usize) -> Result<alloc::vec::Vec<u8>, crate::utils::ErrorNum> {
+    fn read(&self, _length: usize) -> Result<alloc::vec::Vec<u8>, crate::utils::ErrorNum> {
         todo!()
     }
 
@@ -26,7 +26,7 @@ impl Driver for VirtIO {
         todo!()
     }
 
-    fn ioctl(&self, op: usize, data: Vec<u8>) -> Result<Vec<u8>, crate::utils::ErrorNum> {
+    fn ioctl(&self, _op: usize, _data: Vec<u8>) -> Result<Vec<u8>, crate::utils::ErrorNum> {
         todo!()
     }
 
